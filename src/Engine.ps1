@@ -20,7 +20,12 @@
 # 所有失敗都變成 Outcome。
 
 $script:ActStepFailedRegex = [regex]'(❌\s+Failure|Job failed|🏁\s+Job failed)'
-$script:ActInfraRegex = [regex]'(Cannot connect to the Docker daemon|docker\.sock|permission denied while trying to connect|failed to start container|unable to find image|Error: failed to pull|no such file or directory: .*act)'
+# 只認**故障**的字句，不要認例行訊息。2026-09-06 踩到：原本這裡有 `docker\.sock`，而 act 每一輪
+# 都會印一行 `Using docker host 'unix:///var/run/docker.sock'`。於是第一次真的有測試紅掉時
+# （509c07b4，3441 支跑完、job failed），判定被寫成「CI 自己出問題」而不是「測試失敗」，
+# 推到 GitHub 的是 error 不是 failure —— 而這兩種紅字要分開，正是這個專案存在的理由之一。
+# 原本還有 `unable to find image`，那也是例行的：act 拉映像之前一定會印它。
+$script:ActInfraRegex = [regex]'(Cannot connect to the Docker daemon|Is the docker daemon running|permission denied while trying to connect to the Docker daemon|failed to start container|Error: failed to pull|act: command not found|command not found: act)'
 
 function Get-RepoHeadSha {
     # 回傳完整 sha；不是 git repo 或叫不動就回 ''。

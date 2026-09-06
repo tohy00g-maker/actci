@@ -137,6 +137,31 @@ Describe 'Invoke-ActRun' {
         $v.TestsRun | Should -Be 0
     }
 
+    It '測試真的紅了：failed，不會因為 act 例行印了 docker.sock 就變成 errored' {
+        # 2026-09-06 509c07b4 的形狀：3441 支跑完、job failed，而 log 第一行永遠是
+        # `Using docker host 'unix:///var/run/docker.sock'`。那一行不是故障。
+        $real = @'
+time="2026-09-06T16:51:02+08:00" level=info msg="Using docker host 'unix:///var/run/docker.sock', and daemon socket 'unix:///var/run/docker.sock'"
+[Django checks (hosted, manual)/validate] ⭐ Run Main Run test suite
+[Django checks (hosted, manual)/validate]   | Ran 3441 tests in 900.000s
+[Django checks (hosted, manual)/validate]   | FAILED (failures=2)
+[Django checks (hosted, manual)/validate]   ❌  Failure - Main Run test suite
+[Django checks (hosted, manual)/validate] 🏁  Job failed
+Error: Job 'validate' failed
+'@
+        $script:wslScript = { param($c) if ($c -like '*command -v act*') { Fake 0 '__OK__' } else { Fake 1 $real } }
+        $v = Invoke-ActRun -RepoPath '/r' -Sha 'abc1234'
+        $v.Outcome | Should -Be 'failed'
+        $v.TestsRun | Should -Be 3441
+        Get-StatusState $v | Should -Be 'failure'
+    }
+
+    It 'act 拉映像前印的 unable to find image 也不算故障' {
+        $out = "[CI/test] unable to find image 'catthehacker/ubuntu:act-latest' locally`n[CI/test]   | ==== 3 failed, 5 passed in 1.0s ====`n[CI/test] 🏁  Job failed"
+        $script:wslScript = { param($c) if ($c -like '*command -v act*') { Fake 0 '__OK__' } else { Fake 1 $out } }
+        (Invoke-ActRun -RepoPath '/r' -Sha 'abc1234').Outcome | Should -Be 'failed'
+    }
+
     It 'docker 中途死掉：errored，Note 是那一行' {
         $script:wslScript = { param($c) if ($c -like '*command -v act*') { Fake 0 '__OK__' } else { Fake 1 $script:DockerDown } }
         $v = Invoke-ActRun -RepoPath '/r' -Sha 'abc1234'
