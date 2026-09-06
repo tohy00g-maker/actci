@@ -55,9 +55,25 @@ function Get-WatcherConfig {
     }
 }
 
+$script:RetryErroredAfterMinutes = 30
+
 function Test-VerdictStored {
-    param($Store, [string]$Sha)
-    try { return ($null -ne (Get-StoredVerdict -Store $Store -Sha $Sha)) } catch { return $false }
+    # 「已判定」= 有判定檔，而且不是一份放太久的 errored。
+    #
+    # errored 是 CI 自己的問題（fetch 沒認證、Docker 沒開）。修好之後那個 PR 應該要再跑一次，
+    # 不能因為一份錯誤的判定就永遠跳過它。但也不能每分鐘重試：基礎設施壞著的時候那會每分鐘
+    # 往 PR 推一次 error。折衷：errored 超過 RetryErroredAfterMinutes 就當成沒判定過。
+    param($Store, [string]$Sha, [DateTime]$Now = [DateTime]::UtcNow)
+    try {
+        $v = Get-StoredVerdict -Store $Store -Sha $Sha
+        if ($null -eq $v) { return $false }
+        if ($v.Outcome -ne 'errored') { return $true }
+        $stamp = if ($v.FinishedAt) { $v.FinishedAt } else { $v.StartedAt }
+        try {
+            $at = [DateTime]::Parse($stamp, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+        } catch { return $false }
+        return (($Now.ToUniversalTime() - $at).TotalMinutes -lt $script:RetryErroredAfterMinutes)
+    } catch { return $false }
 }
 
 function Update-PullRequestRef {
@@ -68,7 +84,9 @@ function Update-PullRequestRef {
         [string]$Distro = ''
     )
     $ref = "+refs/pull/$Number/head:refs/actci/pr/$Number"
-    $cmd = 'git -C ' + (ConvertTo-BashArg $RepoPath) + ' fetch --quiet origin ' + (ConvertTo-BashArg $ref) + ' 2>&1'
+    # GIT_TERMINAL_PROMPT=0：沒有認證就立刻失敗，不要對著一個沒人看的 tty 等密碼直到逾時。
+    # 2026-09-06 實測：私有 repo、WSL 沒設 credential helper，fetch 卡了五分鐘。
+    $cmd = 'GIT_TERMINAL_PROMPT=0 git -C ' + (ConvertTo-BashArg $RepoPath) + ' fetch --quiet origin ' + (ConvertTo-BashArg $ref) + ' 2>&1'
     $r = Invoke-Wsl -BashCommand $cmd -TimeoutMs 300000 -Distro $Distro
     if ($r.ExitCode -eq 0) { return [pscustomobject]@{ Ok = $true; Detail = '' } }
     $detail = (($r.Output + ' ' + $r.Error) -replace '\s+', ' ').Trim()

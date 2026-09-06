@@ -27,6 +27,6 @@ Export-ModuleMember -Function @(
     # GitHub
     'Invoke-Gh', 'Test-GhAuth', 'Send-CommitStatus', 'Send-PendingStatus', 'Get-OpenPullRequests',
     # Watcher
-    'Get-WatcherConfigPath', 'Save-WatcherConfig', 'Get-WatcherConfig', 'Update-PullRequestRef',
+    'Get-WatcherConfigPath', 'Save-WatcherConfig', 'Get-WatcherConfig', 'Update-PullRequestRef', 'Test-VerdictStored',
     'Invoke-WatcherRun', 'Invoke-WatcherTick', 'Start-WatcherLoop'
 )

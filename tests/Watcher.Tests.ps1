@@ -67,6 +67,31 @@ Describe 'Invoke-WatcherTick' {
         $script:log[0] | Should -Match '沒事做'
     }
 
+    It 'errored 的判定放超過 30 分鐘就會重跑，剛發生的不會' {
+        $sha = '9' * 40
+        $v = New-Verdict -Sha $sha -Repo '/r' -Outcome 'errored' -Note 'docker down'
+        $v.FinishedAt = '2026-09-06T00:00:00Z'
+        Save-Verdict $script:store $v | Out-Null
+        $t = { param($s) [DateTime]::Parse($s, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) }
+        Test-VerdictStored $script:store $sha -Now (& $t '2026-09-06T00:05:00Z') | Should -BeTrue    # 剛發生：算已判定
+        Test-VerdictStored $script:store $sha -Now (& $t '2026-09-06T00:31:00Z') | Should -BeFalse   # 放了 31 分鐘：要重跑
+        # passed / failed 不管多久都算已判定
+        $ok = New-Verdict -Sha ('8' * 40) -Repo '/r' -Outcome 'failed' -TestsRun 3; $ok.FinishedAt = '2020-01-01T00:00:00Z'
+        Save-Verdict $script:store $ok | Out-Null
+        Test-VerdictStored $script:store ('8' * 40) | Should -BeTrue
+        # 一圈實跑：31 分鐘前的 errored 會被挑起來重跑
+        $v.FinishedAt = [DateTime]::UtcNow.AddMinutes(-31).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        Save-Verdict $script:store $v | Out-Null
+        $script:pullsScript = { [pscustomobject]@{ Pulls = @((Pull 6 ('9' * 40))); Problem = '' } }
+        (Invoke-WatcherTick -Store $script:store -Slug 'me/repo' -RepoPath '/r' -Log $script:logger).Action | Should -Be 'ran'
+    }
+
+    It 'fetch 指令帶 GIT_TERMINAL_PROMPT=0，沒認證就立刻失敗' {
+        $script:pullsScript = { [pscustomobject]@{ Pulls = @((Pull 1 ('a' * 40))); Problem = '' } }
+        Invoke-WatcherTick -Store $script:store -Slug 'me/repo' -RepoPath '/r' -Log $script:logger | Out-Null
+        @($script:fetchCalls | Where-Object { $_ -like 'GIT_TERMINAL_PROMPT=0 git -C*fetch*' }).Count | Should -Be 1
+    }
+
     It '已判定過的 PR 不再跑' {
         $sha = 'a' * 40
         Save-Verdict $script:store (New-Verdict -Sha $sha -Repo '/r' -Outcome 'failed' -TestsRun 3) | Out-Null

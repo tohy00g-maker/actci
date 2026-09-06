@@ -55,6 +55,15 @@ Say "gh 已認證（$($auth.Detail)）"
 $isRepo = Invoke-Wsl -BashCommand ('git -C ' + (ConvertTo-BashArg $repoLinux) + ' rev-parse --git-dir >/dev/null 2>&1 && echo yes || echo no') -TimeoutMs 30000
 if ($isRepo.Output -notlike '*yes*') { Write-Error "$repoLinux 在 WSL 裡不是一個 git repo。" }
 Say "被測的專案 $repoLinux"
+
+# watcher 每一圈都要 git fetch PR 的 commit。私有 repo 而 WSL 的 git 沒有認證的話，這裡就會失敗，
+# 而不是在試跑時對著沒人看的密碼提示卡五分鐘（2026-09-06 實測）。
+$reach = Invoke-Wsl -BashCommand ('cd ' + (ConvertTo-BashArg $repoLinux) + ' && GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --heads origin >/dev/null 2>&1 && echo reachable || echo unreachable') -TimeoutMs 90000
+if ($reach.Output -notlike '*reachable*' -or $reach.Output -like '*unreachable*') {
+    Write-Error ("WSL 裡的 git 連不上 origin（多半是私有 repo 沒有認證）。讓 WSL 的 git 借用 Windows 的 Git Credential Manager：`n" +
+        '  wsl -d ' + (Get-WslDistro) + ' -- git config --global credential.helper "/mnt/c/Program\ Files/Git/mingw64/bin/git-credential-manager.exe"' + "`n然後再跑一次安裝器。")
+}
+Say 'origin 連得上（fetch PR 用）'
 if ($repoLinux -like '/mnt/*') { Say '（提醒：repo 在 Windows 磁碟上，Docker 掛載會慢。放到 Linux 檔案系統會快很多。）' }
 
 Write-Output '== 2/5 先跑一圈'
