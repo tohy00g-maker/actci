@@ -16,11 +16,17 @@ param(
     [string]$Screenshot = ''      # 煙霧測試用：關閉前把視窗截圖存到這個 PNG
 )
 
-# DPI：不向 Windows 宣告的話，在 125%/150% 縮放的螢幕上整個視窗會被當點陣圖放大，字就糊。
-# 要在建立任何視窗之前呼叫。
+# 兩件都要在建立任何視窗之前做。
+#
+# DPI：不宣告的話，在 125%/150% 縮放的螢幕上整個視窗會被當點陣圖放大，字就糊。
+#
+# 工作列圖示不在這裡解決。它取自「持有視窗的那個程序」，所以用 actci.bat（powershell.exe 開的）
+# 啟動時，工作列會顯示 PowerShell 的圖示。試過 SetCurrentProcessExplicitAppUserModelID：它回
+# S_OK 也設得進去，但圖示照舊 —— 因為 powershell.exe 在我們的腳本跑起來之前就已經有一個
+# （隱藏的）主控台視窗了。真正的解法是讓 actci.exe 自己持有視窗，見 assets\build-exe.ps1。
 try {
-    Add-Type -Namespace actci -Name Dpi -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();'
-    [actci.Dpi]::SetProcessDPIAware() | Out-Null
+    Add-Type -Namespace actci -Name Native -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();'
+    [actci.Native]::SetProcessDPIAware() | Out-Null
 } catch {}
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -801,6 +807,7 @@ $form.Add_FormClosing({
 
 $form.Add_Shown({
     Log-Info 'actci 啟動。執行分頁：選 repo → 讀取 job → 執行。監看分頁：watcher 的心跳與判定。環境分頁：檢查與安裝。'
+    Update-RowLayout
     Refresh-Distros
     Refresh-WatchTab
     $watchTimer.Start()
@@ -841,6 +848,18 @@ if ([Math]::Abs($script:UiScale - 1) -gt 0.01) {
     $lblBeat.Font = New-Object System.Drawing.Font('Microsoft JhengHei UI', [single](16 * $k), [System.Drawing.FontStyle]::Bold)
     foreach ($lv in @($lvJobs, $lvVerdicts)) { foreach ($col in $lv.Columns) { $col.Width = [int]($col.Width * $k) } }
 }
+
+function Update-RowLayout {
+    # 右邊那些按鈕列是 AutoSize 而且靠右對齊：字體一放大它們就變寬，於是往左吃掉左邊的輸入框。
+    # 2026-09-06 使用者看到「Repo 路徑」的輸入框蓋住了瀏覽與讀取 job 清單兩顆按鈕。
+    # 所以輸入框的寬度在執行期從按鈕列的實際位置算，不要寫死。
+    $gap = 10
+    $w = $pnlRepoBtns.Left - $txtRepo.Left - $gap
+    if ($w -gt 80) { $txtRepo.Width = $w }
+    $w2 = $pnlRunBtns.Left - $pnlPush.Left - $gap
+    if ($w2 -gt 80) { $pnlPush.MaximumSize = New-Object System.Drawing.Size($w2, 0) }
+}
+$form.Add_Resize({ Update-RowLayout })
 
 [void]$form.ShowDialog()
 if ($AutoCloseSeconds -gt 0) { Write-Output $script:SmokeInfo; Write-Output 'SMOKE: closed cleanly' }

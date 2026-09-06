@@ -104,7 +104,7 @@ watcher 是排程工作 `actci-watcher`，以 conhost --headless 啟動所以沒
 
 | 路徑 | 用途 |
 |---|---|
-| `actci.exe` | 啟動器：帶圖示、無主控台的小程式，開 `actci.ps1`。由 `assets\build-exe.ps1` 用 Windows 內建的 csc.exe 編譯 |
+| `actci.exe` | 帶圖示、無主控台的視窗程式。它把 PowerShell 引擎載進自己的行程來跑 `actci.ps1`，所以視窗屬於 actci.exe 本身，工作列圖示與釘選才會正確。由 `assets\build-exe.ps1` 用 Windows 內建的 csc.exe 編譯 |
 | `actci.ps1` / `actci.bat` | 視窗本體，與不用 exe 時的啟動方式 |
 | `actci-cli.ps1` | 給機器用的指令列：gate、verdict、status、run、preflight、prs |
 | `assets\make-icon.ps1` | 用 GDI+ 畫出 `actci.ico` 與預覽 PNG |
