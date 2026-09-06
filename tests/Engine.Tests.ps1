@@ -34,21 +34,47 @@ Describe 'New-ActCommand' {
     It '有 sha：git archive 到暫存目錄，跑完清掉，離開碼留著' {
         $cmd = New-ActCommand -RepoPath '/home/me/repo' -Sha 'abc1234' -Event 'push' -Job 'test'
         $cmd | Should -Match "git -C '/home/me/repo' archive --format=tar 'abc1234' \| tar -x -C"
-        $cmd | Should -Match 'cd "\$tmp" && NO_COLOR=1 TERM=dumb act .push. -j .test. 2>&1; rc=\$\?; cd /; rm -rf "\$tmp"; exit \$rc$'
+        $cmd | Should -Match 'cd "\$tmp" && NO_COLOR=1 TERM=dumb act --artifact-server-port "\$ap" .push. -j .test. 2>&1; rc=\$\?; cd /; rm -rf "\$tmp"; exit \$rc$'
         $cmd | Should -Match '^export PATH="\$HOME/.local/bin:\$PATH"; '
     }
     It '沒 sha：直接 cd 進 repo' {
         $cmd = New-ActCommand -RepoPath '/home/me/repo' -Event 'pull_request'
-        $cmd | Should -Match "cd '/home/me/repo' && NO_COLOR=1 TERM=dumb act 'pull_request' 2>&1$"
+        $cmd | Should -Match "cd '/home/me/repo' && NO_COLOR=1 TERM=dumb act --artifact-server-port ""\`$ap"" 'pull_request' 2>&1$"
         $cmd | Should -Not -Match 'archive'
     }
     It 'ExtraArgs 逐一加引號，RawArgs 原樣附在後面' {
         $cmd = New-ActCommand -RepoPath '/r' -ExtraArgs @('-W', ".github/workflows/it's.yml") -RawArgs '--env FOO=bar'
-        $cmd | Should -Match "act 'push' '-W' '.github/workflows/it'\\''s.yml' --env FOO=bar 2>&1"
+        $cmd | Should -Match "'push' '-W' '.github/workflows/it'\\''s.yml' --env FOO=bar 2>&1"
     }
     It 'repo 路徑有空白與單引號也安全' {
         $cmd = New-ActCommand -RepoPath "/home/me/my repo's"
         $cmd | Should -Match "cd '/home/me/my repo'\\''s' &&"
+    }
+}
+
+Describe '一次只准一個 act 在跑' {
+    BeforeEach { $script:lockStore = Initialize-Store (New-Store -Path (Join-Path $TestDrive ('lock-' + [guid]::NewGuid().ToString('N')))) }
+
+    It '第二個拿不到鎖（TimeoutMs 0 就立刻放棄）' {
+        $a = Enter-ActLock -Store $script:lockStore
+        try {
+            $a | Should -Not -BeNullOrEmpty
+            Enter-ActLock -Store $script:lockStore | Should -BeNullOrEmpty
+        } finally { Exit-ActLock $a }
+    }
+    It '放掉之後下一個拿得到' {
+        $a = Enter-ActLock -Store $script:lockStore
+        Exit-ActLock $a
+        $b = Enter-ActLock -Store $script:lockStore
+        try { $b | Should -Not -BeNullOrEmpty } finally { Exit-ActLock $b }
+    }
+    It 'Exit-ActLock 收到 null 不會炸' {
+        { Exit-ActLock $null } | Should -Not -Throw
+    }
+    It '每一輪自己找一個沒在聽的埠，不要撞死在 34567' {
+        $cmd = New-ActCommand -RepoPath '/r' -Sha 'abc1234'
+        $cmd | Should -Match 'ss -ltnH'
+        $cmd | Should -Match '--artifact-server-port "\$ap"'
     }
 }
 

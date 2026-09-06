@@ -218,6 +218,15 @@ function Invoke-WatcherRun {
     if ($title.Length -gt 40) { $title = $title.Substring(0, 40) }
     & $Log ("#{0} {1} {2}" -f $Target.Number, $short, $title)
 
+    # 先拿鎖再宣告開始。拿不到就整圈跳過：不推 pending、不存判定，下一圈再來。
+    # 「有人在跑」不是這個 commit 的判定，把它寫成任何一種紅字都是謊報。
+    $lock = Enter-ActLock -Store $Store
+    if (-not $lock) {
+        & $Log "   另一個 act 正在跑，這一圈跳過 #$($Target.Number)"
+        return @{ Action = 'busy'; Number = [int]$Target.Number; Sha = $sha }
+    }
+    try {
+
     Send-PendingStatus -Slug $Slug -Sha $sha -Note "actci 開始跑 #$($Target.Number)" | Out-Null
     # 開始時間只決定一次，心跳與脈搏共用同一個，畫面上的「已經 N 分鐘」才會往上累計。
     $runNote = New-RunningNote -Sha $short -StartedAt ([DateTime]::UtcNow)
@@ -249,6 +258,8 @@ function Invoke-WatcherRun {
         TestsRun = $verdict.TestsRun
         Posted   = [bool]$posted.Posted
     }
+
+    } finally { Exit-ActLock $lock }
 }
 
 function Invoke-WatcherTick {

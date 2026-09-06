@@ -137,6 +137,26 @@ Describe 'Invoke-WatcherTick' {
         $script:actCalls.Count | Should -Be 1
         $script:actCalls[0].Event | Should -Be 'workflow_dispatch'
     }
+    It '另一個 act 在跑時整圈跳過：不推 pending、不存判定' {
+        $script:pullsScript = { [pscustomobject]@{ Pulls = @((Pull 4 ('4' * 40))); Problem = '' } }
+        $held = Enter-ActLock -Store $script:store
+        try {
+            $r = Invoke-WatcherTick -Store $script:store -Slug 'me/repo' -RepoPath '/r' -Log $script:logger
+            $r.Action | Should -Be 'busy'
+            $script:pendingCalls.Count | Should -Be 0
+            $script:statusCalls.Count | Should -Be 0
+            $script:actCalls.Count | Should -Be 0
+            Get-StoredVerdict $script:store ('4' * 40) | Should -BeNullOrEmpty
+            @($script:log | Where-Object { $_ -like '*另一個 act 正在跑*' }).Count | Should -Be 1
+        } finally { Exit-ActLock $held }
+    }
+    It '鎖放掉之後下一圈照常跑' {
+        $script:pullsScript = { [pscustomobject]@{ Pulls = @((Pull 5 ('5' * 40))); Problem = '' } }
+        $held = Enter-ActLock -Store $script:store
+        (Invoke-WatcherTick -Store $script:store -Slug 'me/repo' -RepoPath '/r' -Log $script:logger).Action | Should -Be 'busy'
+        Exit-ActLock $held
+        (Invoke-WatcherTick -Store $script:store -Slug 'me/repo' -RepoPath '/r' -Log $script:logger).Action | Should -Be 'ran'
+    }
     It '待跑的 PR 會在日誌裡講為什麼要跑' {
         $script:pullsScript = { [pscustomobject]@{ Pulls = @((Pull 3 ('c' * 40))); Problem = '' } }
         Invoke-WatcherTick -Store $script:store -Slug 'me/repo' -RepoPath '/r' -Log $script:logger | Out-Null

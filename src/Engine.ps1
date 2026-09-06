@@ -66,6 +66,49 @@ function Test-ActPreflight {
     return [pscustomobject]@{ Ok = $false; Code = 'unknown'; Detail = "前置檢查回了看不懂的東西：$($r.Output)" }
 }
 
+# act 的 artifact server 預設綁死 34567。兩個 act 同時起來，後面那個就 fatal：
+#   listen tcp 172.25.86.185:34567: bind: address already in use
+# 而那會被判成「CI 自己出問題」，跟真的壞掉分不出來（2026-09-06 實際發生：有人手動跑量測，
+# watcher 那一輪就 fatal 了）。每一輪自己找一個沒在聽的埠。
+# 沒有 ss 就退回預設，那時仍然有下面那把鎖擋著。
+$script:FreePortSnippet = 'ap=34567; n=0; while [ $n -lt 50 ] && ss -ltnH 2>/dev/null | grep -q ":$ap "; do ap=$((ap+1)); n=$((n+1)); done; '
+
+function Enter-ActLock {
+    # 一次只准一個 act 在跑。埠是其中一種撞法，六核互搶是另一種 —— 兩個判定同時跑，
+    # 兩邊的秒數都失真，而秒數是這套東西用來說「跑了多久」的依據。
+    #
+    # 用檔案鎖不用具名 mutex：Global\ 的 mutex 一般使用者不一定建得起來，而排程工作與視窗
+    # 不保證在同一個 session。持有者死掉時作業系統會自動放掉檔案控制代碼。
+    param(
+        [Parameter(Mandatory)]$Store,
+        [int]$TimeoutMs = 0,
+        [scriptblock]$OnWait = $null
+    )
+    Initialize-Store $Store | Out-Null
+    $path = Join-Path $Store.Root 'act.lock'
+    $deadline = (Get-Date).AddMilliseconds([Math]::Max(0, $TimeoutMs))
+    $told = $false
+    while ($true) {
+        try {
+            return [System.IO.File]::Open($path, [System.IO.FileMode]::OpenOrCreate,
+                                          [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        } catch [System.IO.IOException] {
+            if ((Get-Date) -ge $deadline) { return $null }
+            if (-not $told -and $OnWait) { & $OnWait; $told = $true }
+            Start-Sleep -Seconds 2
+        } catch {
+            return $null
+        }
+    }
+}
+
+function Exit-ActLock {
+    param($Lock)
+    if ($null -eq $Lock) { return }
+    try { $Lock.Close() } catch {}
+    try { $Lock.Dispose() } catch {}
+}
+
 function New-ActCommand {
     # 組出要交給 bash -lc 的那一串。獨立出來讓測試能盯住引號與順序。
     param(
@@ -80,19 +123,19 @@ function New-ActCommand {
     if ($Event) { $actArgs.Add((ConvertTo-BashArg $Event)) }
     if ($Job) { $actArgs.Add('-j'); $actArgs.Add((ConvertTo-BashArg $Job)) }
     foreach ($a in $ExtraArgs) { if ($null -ne $a -and $a -ne '') { $actArgs.Add((ConvertTo-BashArg $a)) } }
-    $act = 'NO_COLOR=1 TERM=dumb act ' + ($actArgs -join ' ')
+    $act = 'NO_COLOR=1 TERM=dumb act --artifact-server-port "$ap" ' + ($actArgs -join ' ')
     if ($RawArgs) { $act += ' ' + $RawArgs.Trim() }
     $act += ' 2>&1'
 
     $repo = ConvertTo-BashArg $RepoPath
     if ($Sha) {
         # 暫存目錄一定清掉，不論 act 結果如何；act 的離開碼要留下來。
-        return $script:BashPrefix +
+        return $script:BashPrefix + $script:FreePortSnippet +
             'tmp=$(mktemp -d /tmp/actci-XXXXXX) || exit 97; ' +
             "git -C $repo archive --format=tar " + (ConvertTo-BashArg $Sha) + ' | tar -x -C "$tmp" || { rm -rf "$tmp"; echo __ARCHIVE_FAILED__; exit 98; }; ' +
             'cd "$tmp" && ' + $act + '; rc=$?; cd /; rm -rf "$tmp"; exit $rc'
     }
-    return $script:BashPrefix + "cd $repo && " + $act
+    return $script:BashPrefix + $script:FreePortSnippet + "cd $repo && " + $act
 }
 
 function Get-LastMeaningfulLine {

@@ -160,6 +160,15 @@ switch ($Command.ToLower()) {
         $job = if ($opts.ContainsKey('job')) { $opts['job'] } else { '' }
         $timeout = if ($opts.ContainsKey('timeout-minutes')) { [int]$opts['timeout-minutes'] * 60000 } else { 3600000 }
         $logDir = if ($opts.ContainsKey('save')) { $store.Logs } else { '' }
+        # 一次只准一個 act 在跑，否則兩邊搶六核、還會撞同一個 artifact server 埠。
+        # 這裡等而不是失敗：手動跑的人要的是結果，不是「現在很忙」。
+        $waitMs = 1000 * 60 * $(if ($opts.ContainsKey('lock-timeout-minutes')) { [int]$opts['lock-timeout-minutes'] } else { 60 })
+        $lock = Enter-ActLock -Store $store -TimeoutMs $waitMs -OnWait { if (-not $json) { Write-Host '另一個 act 正在跑，排隊等它結束…' } }
+        if (-not $lock) {
+            Out-Result ([ordered]@{ error = 'busy'; detail = '另一個 act 正在跑，等不到' }) '另一個 act 正在跑，等不到。稍後再試，或用 --lock-timeout-minutes 等久一點。'
+            exit 1
+        }
+        try {
         $v = Invoke-ActRun -RepoPath $repo -Sha $sha -Event $ev -Job $job -LogDir $logDir -TimeoutMs $timeout
         $posted = $null
         if ($opts.ContainsKey('save')) { Save-Verdict -Store $store -Verdict $v | Out-Null }
@@ -174,6 +183,7 @@ switch ($Command.ToLower()) {
         if ($posted) { $human += "`n回報：" + $(if ($posted.Posted) { $posted.State } else { "失敗 $($posted.Detail)" }) }
         Out-Result $s $human
         exit $(if (Test-VerdictTrustworthy $v) { 0 } else { 1 })
+        } finally { Exit-ActLock $lock }
     }
 
     'preflight' {
