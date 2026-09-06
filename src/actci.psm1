@@ -3,7 +3,7 @@
 
 Set-StrictMode -Version Latest
 
-foreach ($file in @('Verdict.ps1', 'Parse.ps1', 'Store.ps1', 'Status.ps1', 'Wsl.ps1', 'Engine.ps1')) {
+foreach ($file in @('Verdict.ps1', 'Parse.ps1', 'Store.ps1', 'Status.ps1', 'Wsl.ps1', 'Engine.ps1', 'GitHub.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 
@@ -23,5 +23,7 @@ Export-ModuleMember -Function @(
     'Get-WslDistro', 'Set-WslDistro', 'ConvertTo-BashArg', 'ConvertTo-WinArg', 'ConvertTo-WslPath',
     'ConvertFrom-WslBytes', 'New-WslStartInfo', 'Invoke-Wsl', 'Get-WslDistros',
     # Engine
-    'Get-RepoHeadSha', 'Test-ActPreflight', 'New-ActCommand', 'Invoke-ActRun'
+    'Get-RepoHeadSha', 'Test-ActPreflight', 'New-ActCommand', 'Invoke-ActRun',
+    # GitHub
+    'Invoke-Gh', 'Test-GhAuth', 'Send-CommitStatus', 'Send-PendingStatus', 'Get-OpenPullRequests'
 )
