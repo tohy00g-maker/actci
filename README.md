@@ -29,6 +29,28 @@
 
 ---
 
+## 給 AI agent 與腳本用：actci-cli.ps1
+
+這套東西的主要使用者是機器，視窗只是給人看的。離開碼就是介面，不必解析文字；要細節加 `--json`。
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File actci-cli.ps1 <command> [args] [--json]
+```
+
+| 指令 | 做什麼 | 離開碼 |
+|---|---|---|
+| `gate <sha>` | 這個 commit 有值得相信的通過嗎？合併門檻問這個 | 0 有；1 有判定但不可信（含 passed 但 0 支）；2 沒有判定 |
+| `verdict <sha>` | 印判定，`--json` 是完整判定檔 | 0；2 沒有 |
+| `status [--limit N]` | 心跳幾秒前、watcher 設定、最近判定 | 永遠 0 |
+| `run <repo> [--sha S] [--event E] [--job J] [--save] [--push owner/repo] [--context C]` | 用 act 跑一次；`--save` 存進 store，`--push` 推 status（預設 context `actci/manual`） | 0 值得相信的通過；1 其他 |
+| `preflight` | WSL、act、docker、gh 就緒嗎 | 0 全就緒；1 有缺 |
+| `prs <owner/repo>` | 開著的 PR 與各自的判定 | 0；1 問不到 |
+
+共用選項：`--state <dir>`（store，預設 `~\.actci`）、`--distro <name>`。
+
+一個 agent 典型的用法：`prs` 看哪個 PR 還沒判定 → 等 watcher 或自己 `run --sha … --save --push` → 合併前 `gate <sha>`，
+只有離開碼 0 才合併。**不要**自己去讀 headline 判斷「看起來有過」，那正是 gate 存在的理由。
+
 ## 需求
 
 - Windows 10/11，WSL2 發行版（預設 Ubuntu）
@@ -79,6 +101,7 @@ watcher 是排程工作 `actci-watcher`，以 conhost --headless 啟動所以沒
 |---|---|
 | `actci.exe` | 啟動器：帶圖示、無主控台的小程式，開 `actci.ps1`。由 `assets\build-exe.ps1` 用 Windows 內建的 csc.exe 編譯 |
 | `actci.ps1` / `actci.bat` | 視窗本體，與不用 exe 時的啟動方式 |
+| `actci-cli.ps1` | 給機器用的指令列：gate、verdict、status、run、preflight、prs |
 | `assets\make-icon.ps1` | 用 GDI+ 畫出 `actci.ico` 與預覽 PNG |
 | `watcher.ps1` | watcher 入口，平常由排程工作啟動 |
 | `install_watcher.ps1` | 裝排程工作，五步驗證 |
@@ -94,7 +117,11 @@ watcher 是排程工作 `actci-watcher`，以 conhost --headless 啟動所以沒
 | `runner/` | GitHub self-hosted runner 的重啟與看門狗（從 localci 搬來，參數預設值仍是 example-app 的） |
 | `tests/` | Pester 測試，不需要 Docker 與網路 |
 
-判定與日誌：`%LOCALAPPDATA%\actci\verdicts\<sha>.json`、`logs\<sha>.log`、`heartbeat.txt`、`watcher.log`、`watcher.json`。
+判定與日誌：`~\.actci\verdicts\<sha>.json`、`logs\<sha>.log`、`heartbeat.txt`、`watcher.log`、`watcher.json`。
+
+為什麼在 `~\.actci` 不在 `AppData`：Claude 桌面版是 MSIX 打包的，從它啟動的程序（也就是 AI agent 跑的一切）
+寫 `AppData\Local` 會被重導到 `AppData\Local\Packages\Claude_…\LocalCache`，排程 watcher 與使用者雙擊的
+程式看不到。2026-09-06 實測同一個 PR 因此跑了兩次。使用者目錄根下的 `.actci` 不受重導。
 
 ## 測試
 

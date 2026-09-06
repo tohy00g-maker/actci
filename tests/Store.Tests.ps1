@@ -7,8 +7,9 @@ Describe 'Store 基本存取' {
         $script:store = New-Store -Path (Join-Path $TestDrive ('s-' + [guid]::NewGuid().ToString('N')))
     }
 
-    It '預設路徑在 LOCALAPPDATA\actci' {
-        (New-Store).Root | Should -Be (Join-Path $env:LOCALAPPDATA 'actci')
+    It '預設路徑在 USERPROFILE\.actci，不在 AppData（AppData 會被 Claude 桌面版的 MSIX 重導）' {
+        (New-Store).Root | Should -Be (Join-Path $env:USERPROFILE '.actci')
+        (New-Store).Root | Should -Not -Match 'AppData'
     }
     It 'Initialize-Store 建出三個目錄' {
         Initialize-Store $script:store | Out-Null

@@ -1,9 +1,17 @@
 ﻿# 判定與心跳的存放。一個 commit 一個 JSON，心跳一個檔。
 #
-# 預設放 %LOCALAPPDATA%\actci：
+# 預設放 %USERPROFILE%\.actci：
 #   verdicts\<sha>.json
 #   logs\<sha>.log
 #   heartbeat.txt
+#
+# ## 為什麼不是 %LOCALAPPDATA%
+#
+# 2026-09-06 實測：Claude 桌面版是 MSIX 打包的程式，從它啟動的任何程序（AI agent 跑的指令、
+# 安裝器、試跑）寫 AppData\Local 都會被重導到 AppData\Local\Packages\Claude_…\LocalCache，
+# 而排程工作與使用者雙擊的程式讀的是真正的 AppData。結果是 AI 存的判定排程 watcher 看不到，
+# 同一個 PR 跑了兩次。這套東西主要就是給 AI 用的，所以 store 必須放在不會被重導的地方：
+# 使用者目錄根下的 .actci 不在 MSIX 虛擬化的範圍內。
 #
 # 寫檔一律先寫暫存再改名，讓讀的那一邊永遠不會看到寫到一半的檔案。
 # 視窗每五秒重讀這個目錄，watcher 隨時可能在寫。
@@ -12,7 +20,7 @@ $script:Utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
 function New-Store {
     param([string]$Path = '')
-    if (-not $Path) { $Path = Join-Path $env:LOCALAPPDATA 'actci' }
+    if (-not $Path) { $Path = Join-Path $env:USERPROFILE '.actci' }
     [pscustomobject]@{
         PSTypeName = 'actci.Store'
         Root       = $Path

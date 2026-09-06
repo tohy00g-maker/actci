@@ -1,4 +1,4 @@
-# actci 融合決議
+﻿# actci 融合決議
 
 2026-09-06 逐題確認。actci 是 ActRunner（PowerShell + WinForms，用 act 跑 GitHub Actions）
 與 localci（Python，自架 CI 服務，判定推回 GitHub）的融合。兩個來源 repo 都保留不刪。
@@ -121,8 +121,16 @@ act、docker、git archive 都在 WSL 內執行。watcher 排程工作是 Window
 
 ## 13. 名稱：actci
 
-排程工作名 `actci-watcher`，commit status context `actci`，狀態目錄 `~/.actci`（Windows 側為
-`%LOCALAPPDATA%\actci`）。
+排程工作名 `actci-watcher`，commit status context `actci`，狀態目錄 `%USERPROFILE%\.actci`。
+
+第一版寫的是 `%LOCALAPPDATA%\actci`，2026-09-06 當天改掉：Claude 桌面版是 MSIX 打包，從它啟動的程序寫
+AppData 會被重導到套件快取，排程 watcher 看不到 AI 存的判定，同一個 PR 跑了兩次。
+
+## 14. 主要使用者是 AI，視窗是給人看的（2026-09-06 補）
+
+使用者原話：「這套軟體主要是給 AI 用的、只是我私心希望他可視化，也可支援手動。」所以：
+`actci-cli.ps1` 是主要介面，離開碼就是 API（gate 0/1/2），一切輸出可 `--json`；視窗與手動執行沿用但不是設計中心。
+任何新功能先問「agent 怎麼呼叫它、怎麼讀結果」，再問視窗要不要有按鈕。
 
 ---
 
