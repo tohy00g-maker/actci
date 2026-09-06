@@ -58,6 +58,11 @@
   └─ 推 commit status，context `actci`
 ```
 
+**watcher 的事件要選 act 跑得動的那個 workflow 所接受的事件。** act 只跑 `runs-on: ubuntu-*` 的 job；
+一個 repo 若 `pull_request` 只觸發 self-hosted 或 windows 的 workflow，act 會全部跳過，判定會是 CI 錯誤
+（不是通過）。example-app 就是這樣：PR 的 workflow 是 self-hosted Windows，watcher 要改用
+`workflow_dispatch` 去跑 django-checks。安裝前用視窗的執行分頁「讀取 job 清單」，看每個 job 的事件欄。
+
 分支保護可以要求 `actci` 這個 status。手動執行推的是 `actci/manual`，兩者分開，
 避免工作目錄未提交的狀態被當成正式判定。手動執行的判定不存進 store，否則 watcher 會把那個 commit 當成已判定而跳過。
 
@@ -95,6 +100,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Invoke-Tests.ps1
 
 會碰外面的東西（wsl.exe、gh、act、docker）都用 Mock 替掉，因為要測的是**決策**，不是 docker 跑不跑得動。
 WSL 相關有三個真的打 wsl.exe 的整合測試，機器上沒有 WSL 會自動跳過。
+
+## 私有 repo：WSL 的 git 需要認證
+
+watcher 每一圈會在 WSL 裡 `git fetch` PR 的 commit。私有 repo 要讓 WSL 的 git 借用 Windows 的
+Git Credential Manager（安裝器的前置檢查連不上 origin 時也會印這一行）：
+
+```
+wsl -d Ubuntu -- git config --global credential.helper "/mnt/c/Program\ Files/Git/mingw64/bin/git-credential-manager.exe"
+```
 
 ## 已知的 wsl.exe 陷阱
 
