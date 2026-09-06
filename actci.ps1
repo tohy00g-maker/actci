@@ -10,7 +10,11 @@
 
   啟動：雙擊 actci.bat
 #>
-param([int]$AutoCloseSeconds = 0)   # 煙霧測試用：開起來幾秒後自己關掉
+param(
+    [int]$AutoCloseSeconds = 0,   # 煙霧測試用：開起來幾秒後自己關掉
+    [int]$ShowTab = -1,           # 煙霧測試用：一開始切到第幾個分頁（0 執行、1 監看、2 環境）
+    [string]$Screenshot = ''      # 煙霧測試用：關閉前把視窗截圖存到這個 PNG
+)
 
 # DPI：不向 Windows 宣告的話，在 125%/150% 縮放的螢幕上整個視窗會被當點陣圖放大，字就糊。
 # 要在建立任何視窗之前呼叫。
@@ -83,16 +87,32 @@ $AnchorAll = $AnchorTLR -bor [System.Windows.Forms.AnchorStyles]::Bottom
 $Green = [System.Drawing.Color]::ForestGreen; $Red = [System.Drawing.Color]::Firebrick
 $Orange = [System.Drawing.Color]::DarkOrange; $Gray = [System.Drawing.Color]::DimGray
 
+# 標籤與按鈕的寬度一律由文字決定（AutoSize）。固定寬度在字放大或換字型時會把字切掉。
 function New-Label($text, $x, $y, $w, $h = 20) {
     $l = New-Object System.Windows.Forms.Label
     $l.Text = $text; $l.Location = New-Object System.Drawing.Point($x, $y)
-    $l.AutoSize = $false; $l.Size = New-Object System.Drawing.Size($w, $h); $l.TextAlign = 'MiddleLeft'
+    $l.AutoSize = $true; $l.Padding = New-Object System.Windows.Forms.Padding(0, 3, 0, 0)
+    return $l
+}
+function New-Block($text, $x, $y, $w, $h) {
+    # 多行或要固定大小的文字區塊
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $text; $l.Location = New-Object System.Drawing.Point($x, $y)
+    $l.AutoSize = $false; $l.Size = New-Object System.Drawing.Size($w, $h); $l.TextAlign = 'TopLeft'
     return $l
 }
 function New-Button($text, $x, $y, $w, $h = 28) {
     $b = New-Object System.Windows.Forms.Button
     $b.Text = $text; $b.Location = New-Object System.Drawing.Point($x, $y); $b.Size = New-Object System.Drawing.Size($w, $h)
+    $b.AutoSize = $true; $b.AutoSizeMode = 'GrowOnly'; $b.MinimumSize = New-Object System.Drawing.Size($w, $h)
+    $b.Padding = New-Object System.Windows.Forms.Padding(8, 0, 8, 0)
     return $b
+}
+function New-Flow($x, $y, $w, $h) {
+    $p = New-Object System.Windows.Forms.FlowLayoutPanel
+    $p.Location = New-Object System.Drawing.Point($x, $y); $p.Size = New-Object System.Drawing.Size($w, $h)
+    $p.AutoSize = $true; $p.AutoSizeMode = 'GrowAndShrink'; $p.WrapContents = $true
+    return $p
 }
 function New-Check($text, $x, $y, $checked = $false) {
     $c = New-Object System.Windows.Forms.CheckBox
@@ -130,9 +150,11 @@ $tabRun.Controls.Add((New-Label 'Repo 路徑' 10 14 75))
 $txtRepo = New-Object System.Windows.Forms.TextBox
 $txtRepo.Location = New-Object System.Drawing.Point(88, 11); $txtRepo.Size = New-Object System.Drawing.Size(($W - 88 - 235), 24)
 $txtRepo.Anchor = $AnchorTLR; $txtRepo.Text = $settings.RepoPath
-$btnBrowse = New-Button '瀏覽…' ($W - 232) 9 100; $btnBrowse.Anchor = $AnchorTR
-$btnList = New-Button '讀取 job 清單' ($W - 126) 9 116; $btnList.Anchor = $AnchorTR
-$tabRun.Controls.AddRange(@($txtRepo, $btnBrowse, $btnList))
+$pnlRepoBtns = New-Flow ($W - 232) 8 225 32; $pnlRepoBtns.Anchor = $AnchorTR; $pnlRepoBtns.WrapContents = $false
+$btnBrowse = New-Button '瀏覽…' 0 0 90
+$btnList = New-Button '讀取 job 清單' 0 0 110
+$pnlRepoBtns.Controls.AddRange(@($btnBrowse, $btnList))
+$tabRun.Controls.AddRange(@($txtRepo, $pnlRepoBtns))
 
 $lvJobs = New-Object System.Windows.Forms.ListView
 $lvJobs.Location = New-Object System.Drawing.Point(10, 42); $lvJobs.Size = New-Object System.Drawing.Size(($W - 20), 120)
@@ -141,16 +163,20 @@ $lvJobs.GridLines = $true; $lvJobs.HideSelection = $false
 foreach ($c in @(@('Job ID', 160), @('Job 名稱', 200), @('Workflow', 180), @('檔案', 160), @('事件', 230))) { [void]$lvJobs.Columns.Add($c[0], $c[1]) }
 $tabRun.Controls.Add($lvJobs)
 
-$tabRun.Controls.Add((New-Label '事件' 10 172 40))
+$pnlEvent = New-Flow 10 168 ($W - 20) 30; $pnlEvent.Anchor = $AnchorTLR; $pnlEvent.WrapContents = $false
+$lblEvent = New-Label '事件' 0 0 40; $lblEvent.Margin = New-Object System.Windows.Forms.Padding(0, 3, 4, 0)
 $cboEvent = New-Object System.Windows.Forms.ComboBox
-$cboEvent.Location = New-Object System.Drawing.Point(52, 169); $cboEvent.Size = New-Object System.Drawing.Size(160, 24); $cboEvent.DropDownStyle = 'DropDown'
+$cboEvent.Size = New-Object System.Drawing.Size(160, 24); $cboEvent.DropDownStyle = 'DropDown'
+$cboEvent.Margin = New-Object System.Windows.Forms.Padding(0, 1, 14, 0)
 [void]$cboEvent.Items.AddRange(@('push', 'pull_request', 'workflow_dispatch', 'schedule', 'release', 'workflow_call'))
 $cboEvent.Text = $settings.Event
-$chkSelected = New-Check '只跑選取的 job' 225 171 $true
-$chkDry = New-Check 'Dry run (-n)' 350 171
-$chkVerbose = New-Check '詳細 (-v)' 455 171
-$chkReuse = New-Check '保留容器 (--reuse)' 545 171
-$tabRun.Controls.AddRange(@($cboEvent, $chkSelected, $chkDry, $chkVerbose, $chkReuse))
+$chkSelected = New-Check '只跑選取的 job' 0 0 $true
+$chkDry = New-Check 'Dry run (-n)' 0 0
+$chkVerbose = New-Check '詳細 (-v)' 0 0
+$chkReuse = New-Check '保留容器 (--reuse)' 0 0
+foreach ($c in @($chkSelected, $chkDry, $chkVerbose, $chkReuse)) { $c.Margin = New-Object System.Windows.Forms.Padding(0, 4, 12, 0) }
+$pnlEvent.Controls.AddRange(@($lblEvent, $cboEvent, $chkSelected, $chkDry, $chkVerbose, $chkReuse))
+$tabRun.Controls.Add($pnlEvent)
 
 $tabRun.Controls.Add((New-Label '額外參數' 10 202 70))
 $txtExtra = New-Object System.Windows.Forms.TextBox
@@ -158,21 +184,24 @@ $txtExtra.Location = New-Object System.Drawing.Point(88, 199); $txtExtra.Size = 
 $txtExtra.Anchor = $AnchorTLR; $txtExtra.Text = $settings.ExtraArgs
 $tabRun.Controls.Add($txtExtra)
 
-$chkPush = New-Check '跑完推回 GitHub（context actci/manual，以 HEAD 的 sha 為準）' 10 232 $settings.PushManual
-$tabRun.Controls.Add($chkPush)
-$tabRun.Controls.Add((New-Label 'Slug' 470 232 40))
+$pnlPush = New-Flow 10 228 ($W - 20 - 450) 30; $pnlPush.WrapContents = $false
+$chkPush = New-Check '跑完推回 GitHub（context actci/manual，以 HEAD 的 sha 為準）' 0 0 $settings.PushManual
+$chkPush.Margin = New-Object System.Windows.Forms.Padding(0, 4, 12, 0)
+$lblSlug = New-Label 'Slug' 0 0 40; $lblSlug.Margin = New-Object System.Windows.Forms.Padding(0, 3, 4, 0)
 $txtSlug = New-Object System.Windows.Forms.TextBox
-$txtSlug.Location = New-Object System.Drawing.Point(510, 229); $txtSlug.Size = New-Object System.Drawing.Size(200, 24); $txtSlug.Text = $settings.Slug
-$tabRun.Controls.Add($txtSlug)
+$txtSlug.Size = New-Object System.Drawing.Size(200, 24); $txtSlug.Text = $settings.Slug; $txtSlug.Margin = New-Object System.Windows.Forms.Padding(0, 1, 0, 0)
+$pnlPush.Controls.AddRange(@($chkPush, $lblSlug, $txtSlug))
+$tabRun.Controls.Add($pnlPush)
 
-$btnRun = New-Button '▶  執行' ($W - 20 - 435) 226 110 30
-$btnStop = New-Button '■  停止' ($W - 20 - 320) 226 100 30
-$btnClear = New-Button '清除 log' ($W - 20 - 212) 226 100 30
-$btnSave = New-Button '儲存 log…' ($W - 20 - 107) 226 107 30
-foreach ($b in @($btnRun, $btnStop, $btnClear, $btnSave)) { $b.Anchor = $AnchorTR }
+$pnlRunBtns = New-Flow ($W - 20 - 440) 224 440 34; $pnlRunBtns.Anchor = $AnchorTR; $pnlRunBtns.WrapContents = $false
+$btnRun = New-Button '▶  執行' 0 0 110 30
+$btnStop = New-Button '■  停止' 0 0 100 30
+$btnClear = New-Button '清除 log' 0 0 100 30
+$btnSave = New-Button '儲存 log…' 0 0 107 30
 $btnRun.Font = New-Object System.Drawing.Font($form.Font, [System.Drawing.FontStyle]::Bold)
 $btnStop.Enabled = $false
-$tabRun.Controls.AddRange(@($btnRun, $btnStop, $btnClear, $btnSave))
+$pnlRunBtns.Controls.AddRange(@($btnRun, $btnStop, $btnClear, $btnSave))
+$tabRun.Controls.Add($pnlRunBtns)
 
 $rtbLog = New-Object System.Windows.Forms.RichTextBox
 $rtbLog.Location = New-Object System.Drawing.Point(10, 264)
@@ -198,22 +227,21 @@ function Log-Error([string]$t) { Append-Log "[actci] $t`n" ([System.Drawing.Colo
 # ---------------------------------------------------------------------------
 $grpBeat = New-Object System.Windows.Forms.GroupBox
 $grpBeat.Text = 'watcher 心跳'; $grpBeat.Location = New-Object System.Drawing.Point(10, 10); $grpBeat.Size = New-Object System.Drawing.Size(340, 110)
-$lblBeat = New-Label '從來沒有' 14 26 310 40
+$lblBeat = New-Block '從來沒有' 14 26 310 40
 $lblBeat.Font = New-Object System.Drawing.Font('Microsoft JhengHei UI', 16, [System.Drawing.FontStyle]::Bold); $lblBeat.ForeColor = $Gray
-$lblBeatNote = New-Label 'watcher 沒被啟動過' 14 70 310 24; $lblBeatNote.ForeColor = $Gray
+$lblBeatNote = New-Block 'watcher 沒被啟動過' 14 70 310 30; $lblBeatNote.ForeColor = $Gray
 $grpBeat.Controls.AddRange(@($lblBeat, $lblBeatNote))
 $tabWatch.Controls.Add($grpBeat)
 
 $grpCfg = New-Object System.Windows.Forms.GroupBox
 $grpCfg.Text = 'watcher 設定與排程工作'; $grpCfg.Location = New-Object System.Drawing.Point(360, 10); $grpCfg.Size = New-Object System.Drawing.Size(($W - 370), 110)
 $grpCfg.Anchor = $AnchorTLR
-$lblCfg = New-Label '尚未安裝。按「安裝 / 更新 watcher…」。' 14 22 ($W - 400) 44; $lblCfg.Anchor = $AnchorTLR
-$lblTask = New-Label '' 14 66 ($W - 400) 36; $lblTask.Anchor = $AnchorTLR; $lblTask.ForeColor = $Gray
+$lblCfg = New-Block '尚未安裝。按「安裝 / 更新 watcher…」。' 14 22 ($W - 400) 44; $lblCfg.Anchor = $AnchorTLR
+$lblTask = New-Block '' 14 66 ($W - 400) 40; $lblTask.Anchor = $AnchorTLR; $lblTask.ForeColor = $Gray
 $grpCfg.Controls.AddRange(@($lblCfg, $lblTask))
 $tabWatch.Controls.Add($grpCfg)
 
-$pnlWatchBtns = New-Object System.Windows.Forms.FlowLayoutPanel
-$pnlWatchBtns.Location = New-Object System.Drawing.Point(10, 128); $pnlWatchBtns.Size = New-Object System.Drawing.Size(($W - 20), 36); $pnlWatchBtns.Anchor = $AnchorTLR
+$pnlWatchBtns = New-Flow 10 128 ($W - 20) 36; $pnlWatchBtns.Anchor = $AnchorTLR
 $btnInstallWatcher = New-Button '安裝 / 更新 watcher…' 0 0 150
 $btnTaskStart = New-Button '啟動' 0 0 70
 $btnTaskStop = New-Button '停止' 0 0 70
@@ -235,30 +263,30 @@ $tabWatch.Controls.Add($lvVerdicts)
 # ---------------------------------------------------------------------------
 # 分頁三：環境
 # ---------------------------------------------------------------------------
-$tabEnv.Controls.Add((New-Label 'WSL 發行版' 10 16 80))
-$cboDistro = New-Object System.Windows.Forms.ComboBox
-$cboDistro.Location = New-Object System.Drawing.Point(95, 13); $cboDistro.Size = New-Object System.Drawing.Size(160, 24); $cboDistro.DropDownStyle = 'DropDownList'
-$tabEnv.Controls.Add($cboDistro)
-
-$lblWsl    = New-Label 'WSL：未檢查'    10 48 420
-$lblDocker = New-Label 'Docker：未檢查' 10 74 420
-$lblAct    = New-Label 'act：未檢查'    10 100 420
-$lblActrc  = New-Label '.actrc：未檢查' 10 126 420
-$lblGh     = New-Label 'gh：未檢查'     10 152 420
-$tabEnv.Controls.AddRange(@($lblWsl, $lblDocker, $lblAct, $lblActrc, $lblGh))
-
-$pnlEnvBtns = New-Object System.Windows.Forms.FlowLayoutPanel
-$pnlEnvBtns.Location = New-Object System.Drawing.Point(450, 10); $pnlEnvBtns.Size = New-Object System.Drawing.Size(420, 170)
-$btnCheck = New-Button '檢查環境' 0 0 130
-$btnDocker = New-Button '啟動 Docker Desktop' 0 0 150
-$btnInstallAct = New-Button '安裝 / 更新 act' 0 0 130
-$btnActrc = New-Button '建立 ~/.actrc' 0 0 130
-$btnSecrets = New-Button '編輯 secrets' 0 0 130
-$btnOpenHome = New-Button '開啟 Linux 家目錄' 0 0 130
+# 按鈕整排放最上面，狀態行才有整個寬度可用（Docker 的提示很長）。
+$pnlEnvBtns = New-Flow 10 10 ($W - 20) 36; $pnlEnvBtns.Anchor = $AnchorTLR
+$btnCheck = New-Button '檢查環境' 0 0 110
+$btnDocker = New-Button '啟動 Docker Desktop' 0 0 110
+$btnInstallAct = New-Button '安裝 / 更新 act' 0 0 110
+$btnActrc = New-Button '建立 ~/.actrc' 0 0 110
+$btnSecrets = New-Button '編輯 secrets' 0 0 110
+$btnOpenHome = New-Button '開啟 Linux 家目錄' 0 0 110
 $pnlEnvBtns.Controls.AddRange(@($btnCheck, $btnDocker, $btnInstallAct, $btnActrc, $btnSecrets, $btnOpenHome))
 $tabEnv.Controls.Add($pnlEnvBtns)
 
-$lblEnvHelp = New-Label '' 10 190 ($W - 20) 200; $lblEnvHelp.ForeColor = $Gray; $lblEnvHelp.Anchor = $AnchorTLR; $lblEnvHelp.TextAlign = 'TopLeft'
+$lblDistro = New-Label 'WSL 發行版' 10 56 80
+$cboDistro = New-Object System.Windows.Forms.ComboBox
+$cboDistro.Location = New-Object System.Drawing.Point(110, 53); $cboDistro.Size = New-Object System.Drawing.Size(180, 24); $cboDistro.DropDownStyle = 'DropDownList'
+$tabEnv.Controls.AddRange(@($lblDistro, $cboDistro))
+
+$lblWsl    = New-Label 'WSL：未檢查'    10 90 420
+$lblDocker = New-Label 'Docker：未檢查' 10 116 420
+$lblAct    = New-Label 'act：未檢查'    10 142 420
+$lblActrc  = New-Label '.actrc：未檢查' 10 168 420
+$lblGh     = New-Label 'gh：未檢查'     10 194 420
+$tabEnv.Controls.AddRange(@($lblWsl, $lblDocker, $lblAct, $lblActrc, $lblGh))
+
+$lblEnvHelp = New-Block '' 10 236 ($W - 20) 200; $lblEnvHelp.ForeColor = $Gray; $lblEnvHelp.Anchor = $AnchorTLR
 $lblEnvHelp.Text = @"
 順序：啟動 Docker Desktop（並在 Settings > Resources > WSL integration 勾選發行版）→ 安裝 act → 建立 ~/.actrc → 編輯 secrets 填入 GITHUB_TOKEN=你的PAT。
 四個燈都綠，執行分頁就能跑；gh 也綠，才能推回 GitHub 與安裝 watcher。
@@ -642,7 +670,7 @@ function Show-InstallWatcherDialog {
     $tInt = New-Object System.Windows.Forms.NumericUpDown; $tInt.Location = New-Object System.Drawing.Point(370, 81); $tInt.Size = New-Object System.Drawing.Size(80, 24)
     $tInt.Minimum = 15; $tInt.Maximum = 3600; $tInt.Value = if ($cfg) { [int]$cfg.IntervalSeconds } else { 60 }
     $dlg.Controls.Add($tInt)
-    $help = New-Label '會開一個主控台視窗執行 install_watcher.ps1，顯示五個步驟。前提：Docker、act、gh 都已就緒。裝完回到這個分頁按「重新整理」。' 12 116 536 50
+    $help = New-Block '會開一個主控台視窗執行 install_watcher.ps1，顯示五個步驟。前提：Docker、act、gh 都已就緒。裝完回到這個分頁按「重新整理」。' 12 116 536 60
     $help.ForeColor = $Gray; $dlg.Controls.Add($help)
     $bOk = New-Button '安裝' 350 185 95 30; $bCancel = New-Button '取消' 453 185 95 30
     $dlg.Controls.AddRange(@($bOk, $bCancel)); $dlg.AcceptButton = $bOk; $dlg.CancelButton = $bCancel
@@ -747,8 +775,21 @@ $form.Add_Shown({
     if ($AutoCloseSeconds -gt 0) {
         # 事件處理器裡的輸出不會進管線，先記著，關閉後再印。
         $script:SmokeInfo = "SMOKE: shown title=[$($form.Text)] tabs=$($tabs.TabPages.Count) distro=[$($cboDistro.Text)] dpi=$($form.DeviceDpi) client=$($form.ClientSize.Width)x$($form.ClientSize.Height) wsl=[$($lblWsl.Text)] act=[$($lblAct.Text)] gh=[$($lblGh.Text)] beat=[$($lblBeat.Text)]"
+        if ($ShowTab -ge 0 -and $ShowTab -lt $tabs.TabPages.Count) { $tabs.SelectedIndex = $ShowTab }
         $script:Closer = New-Object System.Windows.Forms.Timer; $script:Closer.Interval = $AutoCloseSeconds * 1000
-        $script:Closer.Add_Tick({ $script:Closer.Stop(); $form.Close() })
+        $script:Closer.Add_Tick({
+            $script:Closer.Stop()
+            if ($Screenshot) {
+                try {
+                    # 用 DrawToBitmap 讓視窗自己畫，不抓螢幕：被別的視窗蓋住也抓得到自己。
+                    [System.Windows.Forms.Application]::DoEvents()
+                    $bmp = New-Object System.Drawing.Bitmap($form.Width, $form.Height)
+                    $form.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle(0, 0, $form.Width, $form.Height)))
+                    $bmp.Save($Screenshot, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+                } catch { $script:SmokeInfo += " screenshot-failed=[$($_.Exception.Message)]" }
+            }
+            $form.Close()
+        })
         $script:Closer.Start()
     }
 })
