@@ -591,39 +591,49 @@ $script:WatchTicks = 0
 $script:WatchCfg = $null
 
 function Refresh-Heartbeat {
-    $age = Get-HeartbeatAge -Store $script:Store
-    if (-not $age) { $lblBeat.Text = '從來沒有'; $lblBeat.ForeColor = $Gray; $lblBeatNote.Text = 'watcher 沒被啟動過'; $lblBeatNote.ForeColor = $Gray; return }
-    $s = [int][Math]::Round($age.Seconds)
+    # 狀態的定義只有一份（Get-WatcherHealth，跟 gate 與 CLI 共用），這裡只負責畫。
+    # 執行中時大字顯示的是**這一輪跑多久了**，會往上累計；不是距離上次心跳多久 —— 脈搏每 30 秒
+    # 刷新一次心跳，拿它當經過時間會永遠停在幾秒內（2026-09-06 使用者看到數字一直被歸零）。
+    $h = Get-WatcherHealth -Store $script:Store
     $interval = if ($script:WatchCfg -and $script:WatchCfg.IntervalSeconds) { [int]$script:WatchCfg.IntervalSeconds } else { 60 }
-    $lblBeat.Text = if ($s -lt 120) { "$s 秒前" } elseif ($s -lt 7200) { "$([int]($s / 60)) 分鐘前" } else { "$([int]($s / 3600)) 小時前" }
+    $s = if ($null -ne $h.SecondsAgo) { [int]$h.SecondsAgo } else { 0 }
 
-    # 正在跑測試不是「安靜」。一輪要十幾分鐘，把它畫成「可能停了」等於謊報。
-    # 心跳的備註會說 running <sha>，這時看的是「有沒有超過那一輪的時限」，不是「幾秒沒動」。
-    if ($age.Note -like 'running *') {
-        $lblBeat.Text = '執行中'
-        $lblBeat.ForeColor = $Green
-        $running = ($age.Note -replace '^running\s*', '')
-        $mins = [int]($s / 60)
-        if ($s -gt 3600) {
-            $lblBeatNote.Text = "跑 $running 已經 $mins 分鐘，超過一小時 —— 可能卡住了，看 watcher.log"
-            $lblBeatNote.ForeColor = $Red
-            $lblBeat.ForeColor = $Red
-        } else {
-            $elapsed = if ($s -lt 90) { "$s 秒" } else { "$mins 分鐘" }
-            $lblBeatNote.Text = "正在跑 $running，已經 $elapsed（一輪約 11 分鐘）"
+    switch ($h.State) {
+        'never' {
+            $lblBeat.Text = '從來沒有'; $lblBeat.ForeColor = $Gray
+            $lblBeatNote.Text = 'watcher 沒被啟動過'; $lblBeatNote.ForeColor = $Gray
+        }
+        'running' {
+            $r = [int]$h.RunningSeconds
+            $lblBeat.Text = if ($r -lt 120) { "$r 秒" } else { "$([int]($r / 60)) 分鐘" }
+            $lblBeat.ForeColor = $Green
+            $lblBeatNote.Text = "執行中 $($h.RunningSha)，心跳 $s 秒前"
             $lblBeatNote.ForeColor = $Green
         }
-        return
+        'stuck' {
+            $lblBeat.Text = "$([int]([int]$h.RunningSeconds / 60)) 分鐘"; $lblBeat.ForeColor = $Red
+            $lblBeatNote.Text = "$($h.Detail) —— 看 watcher.log"; $lblBeatNote.ForeColor = $Red
+        }
+        'stale' {
+            $lblBeat.Text = if ($s -lt 7200) { "$([int]($s / 60)) 分鐘前" } else { "$([int]($s / 3600)) 小時前" }
+            $lblBeat.ForeColor = $Red
+            # 排程工作明明在跑卻沒有心跳：多半是這個視窗讀的 store 不是 watcher 寫的那個。
+            $note = $h.Detail
+            if ($script:WatchCfg -and $script:WatchCfg.PSObject.Properties['TaskName']) {
+                $t = Get-ScheduledTask -TaskName $script:WatchCfg.TaskName -ErrorAction SilentlyContinue
+                if ($t -and $t.State -eq 'Running') {
+                    $note = "排程工作在跑但這裡沒看到心跳：這個視窗讀的是 $($script:Store.Root)，可能是舊位置。重開視窗試試。"
+                    $lblBeat.ForeColor = $Orange
+                }
+            }
+            $lblBeatNote.Text = $note; $lblBeatNote.ForeColor = $lblBeat.ForeColor
+        }
+        default {
+            $lblBeat.Text = if ($s -lt 120) { "$s 秒前" } else { "$([int]($s / 60)) 分鐘前" }
+            if ($s -le 2 * $interval) { $lblBeat.ForeColor = $Green; $lblBeatNote.Text = '在輪詢，沒事做'; $lblBeatNote.ForeColor = $Green }
+            else { $lblBeat.ForeColor = $Orange; $lblBeatNote.Text = '有點久了，還沒到當成停掉的門檻'; $lblBeatNote.ForeColor = $Orange }
+        }
     }
-    # 心跳很久沒跳但排程工作卻在 Running：多半是這個視窗讀的 store 跟 watcher 寫的不是同一個
-    # （例如程式是 store 搬家之前開的）。講出來，不然看起來像 watcher 死了。
-    if ($s -gt $script:StaleAfter -and $script:WatchCfg -and $script:WatchCfg.PSObject.Properties['TaskName']) {
-        $t = Get-ScheduledTask -TaskName $script:WatchCfg.TaskName -ErrorAction SilentlyContinue
-        if ($t -and $t.State -eq 'Running') { $lblBeatNote.Text = "排程工作在跑但這裡沒看到心跳：這個視窗讀的是 $($script:Store.Root)，可能是舊位置。重開視窗試試。"; $lblBeatNote.ForeColor = $Orange; return }
-    }
-    if ($s -le 2 * $interval) { $lblBeat.ForeColor = $Green; $lblBeatNote.Text = "在動：$($age.Note)"; $lblBeatNote.ForeColor = $Green }
-    elseif ($s -le $script:StaleAfter) { $lblBeat.ForeColor = $Orange; $lblBeatNote.Text = "有點久了：$($age.Note)"; $lblBeatNote.ForeColor = $Orange }
-    else { $lblBeat.ForeColor = $Red; $lblBeatNote.Text = "太久了，watcher 可能停了（上次：$($age.Note)）"; $lblBeatNote.ForeColor = $Red }
 }
 
 function Refresh-WatcherConfig {

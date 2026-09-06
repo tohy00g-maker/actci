@@ -246,7 +246,10 @@ Describe '跑測試那十幾分鐘裡心跳要繼續跳' {
         Mock -ModuleName actci Send-CommitStatus { [pscustomobject]@{ Posted = $true; State = 'success'; Detail = '' } }
         Mock -ModuleName actci Invoke-ActRun {
             param([string]$RepoPath, [string]$Sha)
-            (Get-HeartbeatAge -Store $store).Note | Should -Be 'running abcdef12'
+            $h = Get-WatcherHealth -Store $store
+            $h.State | Should -Be 'running'
+            $h.RunningSha | Should -Be 'abcdef12'
+            $h.RunningSeconds | Should -BeLessThan 30   # 剛開始
             New-Verdict -Sha $Sha -Repo '/r' -Outcome 'passed' -TestsRun 5
         }
         Invoke-WatcherRun -Store $store -Slug 'me/repo' -RepoPath '/r' -Target (Pull 1 ('abcdef12' + '0' * 32)) -Log { param($m) } | Out-Null
@@ -282,6 +285,29 @@ Describe 'Get-WatcherHealth：活著還是死了' {
         SetBeat 'running abc12345' 61
         $h = Get-WatcherHealth -Store $script:hstore
         $h.State | Should -Be 'stuck'; $h.Alive | Should -BeFalse; $h.RunningSha | Should -Be 'abc12345'
+    }
+    It '「跑多久了」看 since，不看心跳年齡 —— 脈搏刷新心跳不該把它歸零' {
+        # 脈搏 10 秒前才刷新過心跳，但這一輪是 20 分鐘前開始的
+        $since = [DateTime]::UtcNow.AddMinutes(-20).ToString('o')
+        SetBeat "running abc12345 since $since" 0
+        $h = Get-WatcherHealth -Store $script:hstore
+        $h.State | Should -Be 'running'
+        $h.SecondsAgo | Should -BeLessThan 30          # 心跳很新 = 還在動
+        $h.RunningSeconds | Should -BeGreaterThan 1100 # 但已經跑了二十分鐘
+        $h.Detail | Should -Match '20 分鐘'
+    }
+    It 'since 說跑超過一小時 → stuck，即使心跳是新的' {
+        $since = [DateTime]::UtcNow.AddMinutes(-70).ToString('o')
+        SetBeat "running abc12345 since $since" 0
+        $h = Get-WatcherHealth -Store $script:hstore
+        $h.State | Should -Be 'stuck'; $h.Alive | Should -BeFalse
+    }
+    It 'New-RunningNote 產生的備註讀得回來' {
+        $note = New-RunningNote -Sha 'deadbeef' -StartedAt ([DateTime]::UtcNow.AddMinutes(-5))
+        SetBeat $note 0
+        $h = Get-WatcherHealth -Store $script:hstore
+        $h.RunningSha | Should -Be 'deadbeef'
+        $h.RunningSeconds | Should -BeGreaterThan 250
     }
 }
 

@@ -60,6 +60,16 @@ $script:RetryErroredAfterMinutes = 30
 $script:HeartbeatStaleSeconds = 300      # 閒置這麼久沒跳，watcher 大概停了
 $script:RunStuckSeconds = 3600           # 同一個 sha 跑這麼久，大概卡住了
 
+function New-RunningNote {
+    # 心跳要同時回答兩個問題，而它們的時間基準相反：
+    #   「還在動嗎」  -> 看最後一次心跳多久前（脈搏每 30 秒刷新，所以永遠很新）
+    #   「跑多久了」  -> 看這一輪什麼時候開始（**不能**被刷新）
+    # 2026-09-06 加了脈搏之後只留了前者，於是畫面上的「已經 N 分鐘」一直被歸零。
+    # 開始時間寫在備註裡，脈搏只換前面的時間戳，不動它。
+    param([Parameter(Mandatory)][string]$Sha, [DateTime]$StartedAt = [DateTime]::UtcNow)
+    return "running $Sha since " + $StartedAt.ToUniversalTime().ToString('o')
+}
+
 function Get-WatcherHealth {
     # watcher 現在是活的嗎？回 @{ State; Alive; SecondsAgo; RunningSha; Detail }。
     #
@@ -75,24 +85,35 @@ function Get-WatcherHealth {
     $age = Get-HeartbeatAge -Store $Store -Now $Now
     if (-not $age) {
         return [pscustomobject]@{ State = 'never'; Alive = $false; SecondsAgo = $null; RunningSha = ''
-                                  Detail = 'watcher 從來沒有跳過心跳 —— 沒被安裝或沒被啟動過' }
+                                  RunningSeconds = $null; Detail = 'watcher 從來沒有跳過心跳 —— 沒被安裝或沒被啟動過' }
     }
     $s = [Math]::Round($age.Seconds)
-    if ($age.Note -like 'running *') {
-        $sha = ($age.Note -replace '^running\s*', '')
-        if ($age.Seconds -gt $script:RunStuckSeconds) {
-            return [pscustomobject]@{ State = 'stuck'; Alive = $false; SecondsAgo = $s; RunningSha = $sha
-                                      Detail = "watcher 卡在 $sha 已經 $([int]($s / 60)) 分鐘，超過一小時" }
+    if ($age.Note -match '^running\s+(\S+)(?:\s+since\s+(\S+))?') {
+        $sha = $Matches[1]
+        # 跑多久了看開始時間；沒有 since 的是舊格式的心跳，退回用心跳年齡（會低估，但不會誤報）。
+        $running = $s
+        if ($Matches[2]) {
+            try {
+                $startedAt = [DateTime]::Parse($Matches[2], [Globalization.CultureInfo]::InvariantCulture,
+                                               [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+                $running = [Math]::Round([Math]::Max(0, ($Now.ToUniversalTime() - $startedAt).TotalSeconds))
+            } catch {}
         }
+        $mins = [int]($running / 60)
+        if ($running -gt $script:RunStuckSeconds) {
+            return [pscustomobject]@{ State = 'stuck'; Alive = $false; SecondsAgo = $s; RunningSha = $sha
+                                      RunningSeconds = $running; Detail = "watcher 卡在 $sha 已經 $mins 分鐘，超過一小時" }
+        }
+        $elapsed = if ($running -lt 90) { "$running 秒" } else { "$mins 分鐘" }
         return [pscustomobject]@{ State = 'running'; Alive = $true; SecondsAgo = $s; RunningSha = $sha
-                                  Detail = "正在跑 $sha（$([int]($s / 60)) 分鐘）" }
+                                  RunningSeconds = $running; Detail = "正在跑 $sha（$elapsed）" }
     }
     if ($age.Seconds -gt $script:HeartbeatStaleSeconds) {
         return [pscustomobject]@{ State = 'stale'; Alive = $false; SecondsAgo = $s; RunningSha = ''
-                                  Detail = "心跳 $s 秒沒更新，watcher 可能停了" }
+                                  RunningSeconds = $null; Detail = "心跳 $s 秒沒更新，watcher 可能停了" }
     }
     return [pscustomobject]@{ State = 'idle'; Alive = $true; SecondsAgo = $s; RunningSha = ''
-                              Detail = "在輪詢（$s 秒前）" }
+                              RunningSeconds = $null; Detail = "在輪詢（$s 秒前）" }
 }
 
 function Test-VerdictStored {
@@ -198,11 +219,13 @@ function Invoke-WatcherRun {
     & $Log ("#{0} {1} {2}" -f $Target.Number, $short, $title)
 
     Send-PendingStatus -Slug $Slug -Sha $sha -Note "actci 開始跑 #$($Target.Number)" | Out-Null
-    Write-Heartbeat -Store $Store -Note "running $short"
+    # 開始時間只決定一次，心跳與脈搏共用同一個，畫面上的「已經 N 分鐘」才會往上累計。
+    $runNote = New-RunningNote -Sha $short -StartedAt ([DateTime]::UtcNow)
+    Write-Heartbeat -Store $Store -Note $runNote
 
     $fetch = Update-PullRequestRef -RepoPath $RepoPath -Number ([int]$Target.Number) -Distro $Distro
     if ($fetch.Ok) {
-        $pulse = Start-HeartbeatPulse -Store $Store -Note "running $short"
+        $pulse = Start-HeartbeatPulse -Store $Store -Note $runNote
         try {
             $verdict = Invoke-ActRun -RepoPath $RepoPath -Sha $sha -Event $Event -Job $Job -LogDir $Store.Logs -TimeoutMs $TimeoutMs -Distro $Distro
         } finally {

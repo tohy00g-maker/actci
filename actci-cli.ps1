@@ -88,7 +88,7 @@ switch ($Command.ToLower()) {
             if ($health.Alive) {
                 $code = 2
                 $human = if ($health.RunningSha -and $sha.StartsWith($health.RunningSha)) {
-                    "$short 正在判定中（已經 $([int]($health.SecondsAgo / 60)) 分鐘），等它跑完"
+                    "$short 正在判定中（已經 $([int]([int]$health.RunningSeconds / 60)) 分鐘），等它跑完"
                 } else {
                     "$short 還沒判定，watcher $($health.Detail) —— 等它接走"
                 }
@@ -127,8 +127,9 @@ switch ($Command.ToLower()) {
         # 健康狀態的定義只有一份，跟 gate 用的是同一支 Get-WatcherHealth。
         $health = Get-WatcherHealth -Store $store
         $beat = [ordered]@{
+            # secondsAgo = 距離上次心跳多久（還在動嗎）；runningSeconds = 這一輪跑多久了。兩者不同。
             state = $health.State; alive = $health.Alive; secondsAgo = $health.SecondsAgo
-            runningSha = $health.RunningSha; detail = $health.Detail
+            runningSha = $health.RunningSha; runningSeconds = $health.RunningSeconds; detail = $health.Detail
             note = $(if ($age) { $age.Note } else { $null }); at = $(if ($age) { $age.At.ToString('o') } else { $null })
             stale = (-not $health.Alive)
         }
