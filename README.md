@@ -39,7 +39,7 @@
 
 ## 快速開始
 
-1. 雙擊 `actci.bat`。
+1. 雙擊 `actci.exe`（或 `actci.bat`，兩者做同一件事）。
 2. **環境**分頁：按「檢查環境」。依序處理：啟動 Docker Desktop → 安裝 act → 建立 ~/.actrc（選 medium 或 full 映像）→ 編輯 secrets 填入 `GITHUB_TOKEN=你的PAT`。五個燈都綠才算就緒。
 3. **執行**分頁：選 repo（建議放在 Linux 檔案系統，`/mnt/c` 下 Docker 掛載很慢）→ 讀取 job 清單 → 選事件與 job → 執行。輸出即時串流。
    勾「跑完推回 GitHub」會以 HEAD 的 sha 推 `actci/manual` context，推之前會再確認一次。
@@ -68,7 +68,9 @@ watcher 是排程工作 `actci-watcher`，以 conhost --headless 啟動所以沒
 
 | 路徑 | 用途 |
 |---|---|
-| `actci.ps1` / `actci.bat` | 視窗 |
+| `actci.exe` | 啟動器：帶圖示、無主控台的小程式，開 `actci.ps1`。由 `assets\build-exe.ps1` 用 Windows 內建的 csc.exe 編譯 |
+| `actci.ps1` / `actci.bat` | 視窗本體，與不用 exe 時的啟動方式 |
+| `assets\make-icon.ps1` | 用 GDI+ 畫出 `actci.ico` 與預覽 PNG |
 | `watcher.ps1` | watcher 入口，平常由排程工作啟動 |
 | `install_watcher.ps1` | 裝排程工作，五步驗證 |
 | `src/actci.psm1` | 模組，載入下面幾支 |

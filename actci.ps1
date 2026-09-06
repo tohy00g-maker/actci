@@ -71,6 +71,8 @@ $form.StartPosition = 'CenterScreen'
 $form.ClientSize = New-Object System.Drawing.Size(1040, 760)
 $form.MinimumSize = New-Object System.Drawing.Size(920, 640)
 $form.Font = New-Object System.Drawing.Font('Microsoft JhengHei UI', 9)
+$iconPath = Join-Path $script:Root 'assets\actci.ico'
+if (Test-Path $iconPath) { try { $form.Icon = New-Object System.Drawing.Icon($iconPath) } catch {} }
 # 宣告 DPI 之後，版面座標是以 96 DPI 設計的，讓 WinForms 依實際 DPI 把控制項一起放大。
 $form.AutoScaleDimensions = New-Object System.Drawing.SizeF(96, 96)
 $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
