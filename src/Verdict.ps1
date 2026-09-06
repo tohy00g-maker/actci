@@ -56,9 +56,15 @@ function New-Verdict {
         FinishedAt  = ''
         Seconds     = [double]0
         Steps       = @()
+        Jobs        = @()          # act 實際叫起來的 workflow/job：{Workflow, Job, Status, TestsRun}
         LogPath     = ''
         Note        = $Note
     }
+}
+
+function New-VerdictJob {
+    param([Parameter(Mandatory)][string]$Workflow, [Parameter(Mandatory)][string]$Job, [string]$Status = 'unknown', [int]$TestsRun = 0)
+    [pscustomobject]@{ Workflow = $Workflow; Job = $Job; Status = $Status; TestsRun = $TestsRun }
 }
 
 function Test-VerdictPassed {
@@ -88,7 +94,13 @@ function Get-VerdictHeadline {
         return '沒有抓到任何測試數 —— 這不是通過，是沒有驗證'
     }
     $source = if (@($Verdict.TestsSource).Count -gt 0) { @($Verdict.TestsSource) -join '+' } else { '?' }
-    return ('通過（{0} 支，{1:0} 秒，{2}）' -f $Verdict.TestsRun, $Verdict.Seconds, $source)
+    $line = '通過（{0} 支，{1:0} 秒，{2}）' -f $Verdict.TestsRun, $Verdict.Seconds, $source
+    # 跑了不只一個 job 時 TestsRun 是加總，講明是哪幾支，免得 6830 看起來像一套很大的測試。
+    $ran = @($Verdict.Jobs | Where-Object { $_.Status -ne 'skipped' })
+    if ($ran.Count -gt 1) {
+        $line += '，' + $ran.Count + ' 個 job 相加：' + (($ran | ForEach-Object { "$($_.Job) $($_.TestsRun)" }) -join '、')
+    }
+    return $line
 }
 
 function ConvertTo-VerdictJson {
@@ -105,7 +117,7 @@ function ConvertFrom-VerdictJson {
     }
     $v = New-Verdict -Sha ([string]$data.Sha) -Repo ([string]$data.Repo)
     $known = 'Schema', 'Event', 'Job', 'Engine', 'Outcome', 'TestsRun', 'TestsSource',
-             'StartedAt', 'FinishedAt', 'Seconds', 'Steps', 'LogPath', 'Note'
+             'StartedAt', 'FinishedAt', 'Seconds', 'Steps', 'Jobs', 'LogPath', 'Note'
     foreach ($name in $known) {
         $prop = $data.PSObject.Properties[$name]
         if (-not $prop) { continue }
@@ -115,6 +127,13 @@ function ConvertFrom-VerdictJson {
                 $v.Steps = @(foreach ($s in @($value)) {
                     if ($null -ne $s) {
                         New-VerdictStep -Name ([string]$s.Name) -ExitCode ([int]$s.ExitCode) -Seconds ([double]$s.Seconds)
+                    }
+                })
+            }
+            'Jobs' {
+                $v.Jobs = @(foreach ($j in @($value)) {
+                    if ($null -ne $j) {
+                        New-VerdictJob -Workflow ([string]$j.Workflow) -Job ([string]$j.Job) -Status ([string]$j.Status) -TestsRun ([int]$j.TestsRun)
                     }
                 })
             }

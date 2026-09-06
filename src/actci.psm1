@@ -9,11 +9,11 @@ foreach ($file in @('Verdict.ps1', 'Parse.ps1', 'Store.ps1', 'Status.ps1', 'Wsl.
 
 Export-ModuleMember -Function @(
     # Verdict
-    'New-Verdict', 'New-VerdictStep', 'Get-IsoNow',
+    'New-Verdict', 'New-VerdictStep', 'New-VerdictJob', 'Get-IsoNow',
     'Test-VerdictPassed', 'Test-VerdictTrustworthy', 'Get-VerdictHeadline',
     'ConvertTo-VerdictJson', 'ConvertFrom-VerdictJson',
     # Parse
-    'Remove-AnsiCodes', 'ConvertFrom-ActOutput', 'Get-TestsRun',
+    'Remove-AnsiCodes', 'ConvertFrom-ActOutput', 'Get-TestsRun', 'Get-ActJobs',
     # Store
     'New-Store', 'Initialize-Store', 'Save-Verdict', 'Get-StoredVerdict',
     'Get-RecentVerdicts', 'Write-Heartbeat', 'Get-HeartbeatAge',

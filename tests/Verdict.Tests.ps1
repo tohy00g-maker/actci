@@ -40,6 +40,19 @@ Describe 'Get-VerdictHeadline' {
         $v.Seconds = 12.6
         Get-VerdictHeadline $v | Should -Be '通過（42 支，13 秒，pytest）'
     }
+    It '跑了兩個 job 時 headline 講明是相加，被跳過的不算' {
+        $v = New-Verdict -Sha 'abc1234' -Repo 'r' -Outcome 'passed' -TestsRun 6830 -TestsSource @('unittest')
+        $v.Seconds = 711
+        $v.Jobs = @((New-VerdictJob -Workflow 'A' -Job 'validate' -Status 'succeeded' -TestsRun 3415),
+                    (New-VerdictJob -Workflow 'B' -Job 'full' -Status 'succeeded' -TestsRun 3415),
+                    (New-VerdictJob -Workflow 'C' -Job 'validate' -Status 'skipped'))
+        Get-VerdictHeadline $v | Should -Be '通過（6830 支，711 秒，unittest），2 個 job 相加：validate 3415、full 3415'
+    }
+    It '只跑一個 job 的 headline 不加贅字' {
+        $v = New-Verdict -Sha 'abc1234' -Repo 'r' -Outcome 'passed' -TestsRun 3415 -TestsSource @('unittest')
+        $v.Jobs = @((New-VerdictJob -Workflow 'A' -Job 'validate' -Status 'succeeded' -TestsRun 3415))
+        Get-VerdictHeadline $v | Should -Not -Match '相加'
+    }
     It '0 支的通過講成沒有驗證' {
         $v = New-Verdict -Sha 'abc1234' -Repo 'r' -Outcome 'passed' -TestsRun 0
         Get-VerdictHeadline $v | Should -Match '沒有驗證'
@@ -65,7 +78,12 @@ Describe 'JSON 往返' {
         $v.FinishedAt = '2026-09-06T01:02:03Z'
         $v.LogPath = 'C:\x\deadbeef.log'
         $v.Steps = @((New-VerdictStep -Name 'act' -ExitCode 1 -Seconds 4.5))
+        $v.Jobs = @((New-VerdictJob -Workflow 'CI' -Job 'test' -Status 'failed' -TestsRun 3))
         $back = ConvertFrom-VerdictJson (ConvertTo-VerdictJson $v)
+        @($back.Jobs).Count | Should -Be 1
+        $back.Jobs[0].Workflow | Should -Be 'CI'
+        $back.Jobs[0].Status | Should -Be 'failed'
+        $back.Jobs[0].TestsRun | Should -Be 3
         $back.Sha | Should -Be 'deadbeef'
         $back.Outcome | Should -Be 'failed'
         $back.TestsRun | Should -Be 3

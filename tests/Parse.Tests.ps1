@@ -116,6 +116,41 @@ Describe 'Get-TestsRun 各框架' {
     }
 }
 
+Describe 'Get-ActJobs：實際跑了哪幾支' {
+    It '兩支 workflow 各自的狀態與測試數，被跳過的也列出來' {
+        $out = @'
+[Django checks (hosted, manual)/validate] ⭐ Run Main Run test suite
+[Django checks (hosted, manual)/validate]   | Ran 3415 tests in 579.053s
+[Django checks (hosted, manual)/validate] 🏁  Job succeeded
+[Monthly full suite/full                ] ⭐ Run Main Run the whole suite
+[Monthly full suite/full                ]   | Ran 3415 tests in 565.977s
+[Monthly full suite/full                ] 🏁  Job succeeded
+[Self-hosted checks/validate] 🚧  Skipping unsupported platform -- Try running with `-P self-hosted=...`
+'@
+        $jobs = @(Get-ActJobs $out)
+        $jobs.Count | Should -Be 3
+        $jobs[0].Workflow | Should -Be 'Django checks (hosted, manual)'
+        $jobs[0].Job | Should -Be 'validate'
+        $jobs[0].Status | Should -Be 'succeeded'
+        $jobs[0].TestsRun | Should -Be 3415
+        $jobs[1].Job | Should -Be 'full'
+        $jobs[1].TestsRun | Should -Be 3415
+        $jobs[2].Workflow | Should -Be 'Self-hosted checks'
+        $jobs[2].Status | Should -Be 'skipped'
+        $jobs[2].TestsRun | Should -Be 0
+        (Get-TestsRun $out).Count | Should -Be 6830
+    }
+    It '失敗的 job 狀態是 failed' {
+        $jobs = @(Get-ActJobs "[CI/test]   | ===== 2 failed, 10 passed in 1.0s =====`n[CI/test]   ❌  Failure - Main pytest`n[CI/test] 🏁  Job failed")
+        $jobs[0].Status | Should -Be 'failed'
+        $jobs[0].TestsRun | Should -Be 12
+    }
+    It '沒有 act 前綴的輸出回空陣列' {
+        @(Get-ActJobs "time=x level=info msg=hello").Count | Should -Be 0
+        @(Get-ActJobs '').Count | Should -Be 0
+    }
+}
+
 Describe 'Get-TestsRun 組合情況' {
     It '什麼都認不出來回 0 與空來源' {
         $r = Get-TestsRun "[CI/build] ⭐ Run Main npm run build`n[CI/build]   | done`n[CI/build] 🏁  Job succeeded"

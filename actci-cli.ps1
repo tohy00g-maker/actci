@@ -62,6 +62,10 @@ function Get-VerdictSummary($v) {
         sha = $v.Sha; outcome = $v.Outcome; testsRun = $v.TestsRun; testsSource = @($v.TestsSource)
         trustworthy = (Test-VerdictTrustworthy $v); state = (Get-StatusState $v); headline = (Get-VerdictHeadline $v)
         event = $v.Event; job = $v.Job; seconds = [Math]::Round($v.Seconds, 1); finishedAt = $v.FinishedAt
+        # testsRun 是 ranJobs 裡各 job 的加總；requestedJob 是傳給 act -j 的，空字串代表該事件下全部
+        testsRunIsSumOfJobs = $true
+        requestedJob = $v.Job
+        ranJobs = @($v.Jobs | ForEach-Object { [ordered]@{ workflow = $_.Workflow; job = $_.Job; status = $_.Status; testsRun = $_.TestsRun } })
         note = $v.Note; logPath = $v.LogPath
     }
 }

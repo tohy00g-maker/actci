@@ -124,6 +124,36 @@ $script:TestParsers = [ordered]@{
     }
 }
 
+$script:ActJobPrefixRegex = [regex]'^\[([^\]/]+)/([^\]]*?)\s*\]'
+
+function Get-ActJobs {
+    # act 實際叫起來的每一個 workflow/job：狀態與各自的測試數。
+    # 判定裡 TestsRun 是全部相加，單看那個數字不知道是一支還是兩支全套；這裡把它拆開。
+    # 2026-09-06：兩支 workflow 都收 workflow_dispatch，act 兩支都跑，6830 = 3415 × 2，
+    # 而判定檔只記了傳進來的 Job=""，看起來像沒設定而不是跑了全部。
+    param([AllowEmptyString()][string]$Output)
+    $jobs = [ordered]@{}
+    if ($Output) {
+        foreach ($raw in ((Remove-AnsiCodes $Output) -replace "`r", '' -split "`n")) {
+            $m = $script:ActJobPrefixRegex.Match($raw)
+            if (-not $m.Success) { continue }
+            $key = $m.Groups[1].Value + '/' + $m.Groups[2].Value
+            if (-not $jobs.Contains($key)) {
+                $jobs[$key] = [pscustomobject]@{ Workflow = $m.Groups[1].Value; Job = $m.Groups[2].Value; Status = 'unknown'; TestsRun = 0; Lines = (New-Object System.Collections.Generic.List[string]) }
+            }
+            $entry = $jobs[$key]
+            $entry.Lines.Add($raw)
+            if ($raw -match 'Job succeeded') { $entry.Status = 'succeeded' }
+            elseif ($raw -match 'Job failed') { $entry.Status = 'failed' }
+            elseif ($raw -match 'Skipping unsupported platform' -and $entry.Status -eq 'unknown') { $entry.Status = 'skipped' }
+        }
+    }
+    return @(foreach ($e in $jobs.Values) {
+        $tests = Get-TestsRun ($e.Lines -join "`n")
+        [pscustomobject]@{ Workflow = $e.Workflow; Job = $e.Job; Status = $e.Status; TestsRun = $tests.Count }
+    })
+}
+
 function Get-TestsRun {
     # 回傳 @{ Count = [int]; Sources = [string[]] }。
     # 專案可在 workflow 最後 echo 一行 ACTCI_TESTS_RUN=N 直接指定，優先於自動辨識。

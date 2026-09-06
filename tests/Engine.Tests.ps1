@@ -91,6 +91,8 @@ Describe 'Invoke-ActRun' {
         $v.Job | Should -Be 'test'
         $v.FinishedAt | Should -Not -BeNullOrEmpty
         $v.Steps[0].ExitCode | Should -Be 0
+        @($v.Jobs).Count | Should -Be 1
+        $v.Jobs[0].Workflow | Should -Be 'CI'; $v.Jobs[0].Job | Should -Be 'test'; $v.Jobs[0].Status | Should -Be 'succeeded'; $v.Jobs[0].TestsRun | Should -Be 12
         $v.LogPath | Should -Be (Join-Path $script:logDir 'abcdef123456.log')
         Get-Content $v.LogPath -Raw | Should -Match '12 passed'
         $script:calls[1] | Should -Match "archive --format=tar 'abcdef1234567890'"

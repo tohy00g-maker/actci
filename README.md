@@ -40,7 +40,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File actci-cli.ps1 <command> [arg
 | 指令 | 做什麼 | 離開碼 |
 |---|---|---|
 | `gate <sha>` | 這個 commit 有值得相信的通過嗎？合併門檻問這個 | 0 有；1 有判定但不可信（含 passed 但 0 支）；2 沒有判定 |
-| `verdict <sha>` | 印判定，`--json` 是完整判定檔 | 0；2 沒有 |
+| `verdict <sha>` | 印判定，`--json` 是完整判定檔（含 `Jobs`：act 實際跑了哪幾支 workflow/job、各自狀態與測試數；`TestsRun` 是它們的加總） | 0；2 沒有 |
 | `status [--limit N]` | 心跳幾秒前、watcher 設定、最近判定 | 永遠 0 |
 | `run <repo> [--sha S] [--event E] [--job J] [--save] [--push owner/repo] [--context C]` | 用 act 跑一次；`--save` 存進 store，`--push` 推 status（預設 context `actci/manual`） | 0 值得相信的通過；1 其他 |
 | `preflight` | WSL、act、docker、gh 就緒嗎 | 0 全就緒；1 有缺 |
@@ -89,7 +89,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File actci-cli.ps1 <command> [arg
 都收 `workflow_dispatch`，不指定的話 act 會兩個都跑，測試數變成兩倍、時間也兩倍。安裝對話框有 Job ID 欄，
 命令列是 `-Job validate`。
 
-分支保護可以要求 `actci` 這個 status。手動執行推的是 `actci/manual`，兩者分開，
+分支保護可以要求 `actci` 這個 status（私有 repo 要 GitHub Pro 或組織方案；免費方案的私有 repo 沒有分支保護，
+門檻只能靠 agent 合併前呼叫 `gate`）。手動執行推的是 `actci/manual`，兩者分開，
 避免工作目錄未提交的狀態被當成正式判定。手動執行的判定不存進 store，否則 watcher 會把那個 commit 當成已判定而跳過。
 
 watcher 是排程工作 `actci-watcher`，以 conhost --headless 啟動所以沒有視窗，每 10 分鐘的重複觸發是重啟保險。

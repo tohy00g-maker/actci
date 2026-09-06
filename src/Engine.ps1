@@ -178,6 +178,7 @@ function Complete-ActVerdict {
     $tests = Get-TestsRun $text
     $Verdict.TestsRun = $tests.Count
     $Verdict.TestsSource = $tests.Sources
+    $Verdict.Jobs = @(Get-ActJobs $text)
 
     if ($ExitCode -eq -1 -and $ErrorText -like '逾時*') {
         $Verdict.Outcome = 'errored'
