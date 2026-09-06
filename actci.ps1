@@ -155,7 +155,10 @@ $W = $tabRun.ClientSize.Width   # 分頁內可用寬度（設計時）
 $tabRun.Controls.Add((New-Label 'Repo 路徑' 10 14 75))
 $txtRepo = New-Object System.Windows.Forms.TextBox
 $txtRepo.Location = New-Object System.Drawing.Point(88, 11); $txtRepo.Size = New-Object System.Drawing.Size(($W - 88 - 235), 24)
-$txtRepo.Anchor = $AnchorTLR; $txtRepo.Text = $settings.RepoPath
+$txtRepo.Anchor = $AnchorTLR
+# 沒有存過就沿用 watcher 監看的那個 repo：多數時候要手動跑的就是同一個。
+$txtRepo.Text = if ($settings.RepoPath) { $settings.RepoPath }
+                else { $c = Get-WatcherConfig -Store $script:Store; if ($c) { [string]$c.Repo } else { '' } }
 $pnlRepoBtns = New-Flow ($W - 232) 8 225 32; $pnlRepoBtns.Anchor = $AnchorTR; $pnlRepoBtns.WrapContents = $false
 $btnBrowse = New-Button '瀏覽…' 0 0 90
 $btnList = New-Button '讀取 job 清單' 0 0 110
@@ -850,14 +853,25 @@ if ([Math]::Abs($script:UiScale - 1) -gt 0.01) {
 }
 
 function Update-RowLayout {
-    # 右邊那些按鈕列是 AutoSize 而且靠右對齊：字體一放大它們就變寬，於是往左吃掉左邊的輸入框。
-    # 2026-09-06 使用者看到「Repo 路徑」的輸入框蓋住了瀏覽與讀取 job 清單兩顆按鈕。
-    # 所以輸入框的寬度在執行期從按鈕列的實際位置算，不要寫死。
+    # 版面是以 9pt 設計的，字體放大之後有兩種壓到別人的方式，兩種都出現過（2026-09-06）：
+    #   1. 按鈕列是 AutoSize 又靠右對齊，變寬就往左吃掉輸入框 —— Repo 路徑的框蓋住兩顆按鈕。
+    #   2. 按鈕變高，往下壓到底下的表格。
+    # 所以尺寸都在執行期用「現在這個字型量出來的文字大小」算，不要相信設計時的數字。
     $gap = 10
+
+    # 按鈕的寬度交給 AutoSize 自己量，不要自己算 —— 試過用 TextRenderer.MeasureText 指定尺寸，
+    # 忘了按鈕本身的 Padding，結果每顆按鈕的字都被擠成兩行還被切掉。這裡只處理位置。
     $w = $pnlRepoBtns.Left - $txtRepo.Left - $gap
     if ($w -gt 80) { $txtRepo.Width = $w }
     $w2 = $pnlRunBtns.Left - $pnlPush.Left - $gap
     if ($w2 -gt 80) { $pnlPush.MaximumSize = New-Object System.Drawing.Size($w2, 0) }
+
+    # 表格讓位給上面那一列，但**底邊不動** —— 讓位的代價是表格變矮，不是把底下的東西全部推下去。
+    $top = [Math]::Max($pnlRepoBtns.Bottom, $txtRepo.Bottom) + 8
+    if ($lvJobs.Top -ne $top) {
+        $delta = $top - $lvJobs.Top
+        if ($lvJobs.Height - $delta -gt 60) { $lvJobs.Top = $top; $lvJobs.Height = $lvJobs.Height - $delta }
+    }
 }
 $form.Add_Resize({ Update-RowLayout })
 
