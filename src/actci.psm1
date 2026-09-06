@@ -3,7 +3,7 @@
 
 Set-StrictMode -Version Latest
 
-foreach ($file in @('Verdict.ps1', 'Parse.ps1', 'Store.ps1', 'Status.ps1')) {
+foreach ($file in @('Verdict.ps1', 'Parse.ps1', 'Store.ps1', 'Status.ps1', 'Wsl.ps1', 'Engine.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 
@@ -18,5 +18,10 @@ Export-ModuleMember -Function @(
     'New-Store', 'Initialize-Store', 'Save-Verdict', 'Get-StoredVerdict',
     'Get-RecentVerdicts', 'Write-Heartbeat', 'Get-HeartbeatAge',
     # Status
-    'Get-StatusState', 'New-StatusPayload'
+    'Get-StatusState', 'New-StatusPayload',
+    # Wsl
+    'Get-WslDistro', 'Set-WslDistro', 'ConvertTo-BashArg', 'ConvertTo-WinArg', 'ConvertTo-WslPath',
+    'ConvertFrom-WslBytes', 'New-WslStartInfo', 'Invoke-Wsl', 'Get-WslDistros',
+    # Engine
+    'Get-RepoHeadSha', 'Test-ActPreflight', 'New-ActCommand', 'Invoke-ActRun'
 )
