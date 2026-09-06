@@ -587,6 +587,25 @@ function Refresh-Heartbeat {
     $s = [int][Math]::Round($age.Seconds)
     $interval = if ($script:WatchCfg -and $script:WatchCfg.IntervalSeconds) { [int]$script:WatchCfg.IntervalSeconds } else { 60 }
     $lblBeat.Text = if ($s -lt 120) { "$s 秒前" } elseif ($s -lt 7200) { "$([int]($s / 60)) 分鐘前" } else { "$([int]($s / 3600)) 小時前" }
+
+    # 正在跑測試不是「安靜」。一輪要十幾分鐘，把它畫成「可能停了」等於謊報。
+    # 心跳的備註會說 running <sha>，這時看的是「有沒有超過那一輪的時限」，不是「幾秒沒動」。
+    if ($age.Note -like 'running *') {
+        $lblBeat.Text = '執行中'
+        $lblBeat.ForeColor = $Green
+        $running = ($age.Note -replace '^running\s*', '')
+        $mins = [int]($s / 60)
+        if ($s -gt 3600) {
+            $lblBeatNote.Text = "跑 $running 已經 $mins 分鐘，超過一小時 —— 可能卡住了，看 watcher.log"
+            $lblBeatNote.ForeColor = $Red
+            $lblBeat.ForeColor = $Red
+        } else {
+            $elapsed = if ($s -lt 90) { "$s 秒" } else { "$mins 分鐘" }
+            $lblBeatNote.Text = "正在跑 $running，已經 $elapsed（一輪約 11 分鐘）"
+            $lblBeatNote.ForeColor = $Green
+        }
+        return
+    }
     # 心跳很久沒跳但排程工作卻在 Running：多半是這個視窗讀的 store 跟 watcher 寫的不是同一個
     # （例如程式是 store 搬家之前開的）。講出來，不然看起來像 watcher 死了。
     if ($s -gt $script:StaleAfter -and $script:WatchCfg -and $script:WatchCfg.PSObject.Properties['TaskName']) {

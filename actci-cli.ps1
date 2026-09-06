@@ -100,7 +100,16 @@ switch ($Command.ToLower()) {
         $age = Get-HeartbeatAge -Store $store
         $cfg = Get-WatcherConfig -Store $store
         $recent = @(Get-RecentVerdicts -Store $store -Limit $limit -WarningAction SilentlyContinue)
-        $beat = if ($age) { [ordered]@{ secondsAgo = [Math]::Round($age.Seconds); note = $age.Note; at = $age.At.ToString('o') } } else { $null }
+        # running = 正在跑某個 sha 的判定；idle = 在輪詢等事情做。stale 只對 idle 有意義。
+        $beat = if ($age) {
+            $isRunning = $age.Note -like 'running *'
+            [ordered]@{
+                secondsAgo = [Math]::Round($age.Seconds); note = $age.Note; at = $age.At.ToString('o')
+                state = $(if ($isRunning) { 'running' } else { 'idle' })
+                runningSha = $(if ($isRunning) { ($age.Note -replace '^running\s*', '') } else { $null })
+                stale = $(if ($isRunning) { $age.Seconds -gt 3600 } else { $age.Seconds -gt 300 })
+            }
+        } else { $null }
         $obj = [ordered]@{
             store = $store.Root
             heartbeat = $beat
@@ -110,6 +119,11 @@ switch ($Command.ToLower()) {
         $lines = New-Object System.Collections.Generic.List[string]
         $lines.Add("store：$($store.Root)")
         if (-not $age) { $lines.Add('心跳：從來沒有 —— watcher 沒被啟動過') }
+        elseif ($age.Note -like 'running *') {
+            # 正在跑測試不是安靜。這時的門檻是那一輪的時限，不是幾秒沒動。
+            $over = $age.Seconds -gt 3600
+            $lines.Add(('心跳：執行中 {0}，已經 {1:0} 秒{2}' -f ($age.Note -replace '^running\s*', ''), $age.Seconds, $(if ($over) { '  ** 超過一小時，可能卡住了 **' } else { '' })))
+        }
         else { $stale = $age.Seconds -gt 300; $lines.Add(('心跳：{0:0} 秒前（{1}）{2}' -f $age.Seconds, $age.Note, $(if ($stale) { '  ** 太久了，watcher 可能停了 **' } else { '' }))) }
         if ($cfg) { $lines.Add("watcher：$($cfg.Slug) 事件 $($cfg.Event) $(if ($cfg.PSObject.Properties['Job'] -and $cfg.Job) { "job $($cfg.Job)" }) 每 $($cfg.IntervalSeconds) 秒") }
         if ($recent.Count -eq 0) { $lines.Add('還沒有任何判定。') }

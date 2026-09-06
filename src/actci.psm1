@@ -28,5 +28,6 @@ Export-ModuleMember -Function @(
     'Invoke-Gh', 'Test-GhAuth', 'Send-CommitStatus', 'Send-PendingStatus', 'Get-OpenPullRequests',
     # Watcher
     'Get-WatcherConfigPath', 'Save-WatcherConfig', 'Get-WatcherConfig', 'Update-PullRequestRef', 'Test-VerdictStored',
-    'Invoke-WatcherRun', 'Invoke-WatcherTick', 'Start-WatcherLoop'
+    'Invoke-WatcherRun', 'Invoke-WatcherTick', 'Start-WatcherLoop',
+    'Start-HeartbeatPulse', 'Stop-HeartbeatPulse'
 )

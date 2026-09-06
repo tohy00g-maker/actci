@@ -95,6 +95,53 @@ function Update-PullRequestRef {
     return [pscustomobject]@{ Ok = $false; Detail = "git fetch PR #$Number 失敗：$detail" }
 }
 
+function Start-HeartbeatPulse {
+    # 跑測試那十幾分鐘裡，主執行緒卡在 act 上，心跳不會更新 —— 於是一個健康的 watcher 在畫面上
+    # 看起來像停了。開一個獨立 runspace 定期寫心跳：它跳，就證明 watcher 這個**行程**還活著，
+    # 而不只是「它啟動了某個東西」。這正是 localci 那條「還在跟還在動是兩件事」的另一面。
+    param(
+        [Parameter(Mandatory)]$Store,
+        [Parameter(Mandatory)][string]$Note,
+        [int]$IntervalSeconds = 30
+    )
+    try {
+        $rs = [runspacefactory]::CreateRunspace()
+        $rs.Open()
+        $ps = [PowerShell]::Create()
+        $ps.Runspace = $rs
+        # 一句一句加，不要串成一條再 [void] + Out-Null —— 那樣會拿到「參數型別不能是 Void」。
+        $null = $ps.AddScript({
+            param($Path, $Note, $Interval)
+            while ($true) {
+                try {
+                    $tmp = "$Path.tmp"
+                    $text = [DateTime]::UtcNow.ToString('o') + "`n" + $Note + "`n"
+                    [System.IO.File]::WriteAllText($tmp, $text, (New-Object System.Text.UTF8Encoding $false))
+                    [System.IO.File]::Copy($tmp, $Path, $true)
+                    [System.IO.File]::Delete($tmp)
+                } catch {}
+                Start-Sleep -Seconds $Interval
+            }
+        })
+        $null = $ps.AddArgument($Store.Heartbeat)
+        $null = $ps.AddArgument($Note)
+        $null = $ps.AddArgument($IntervalSeconds)
+        $handle = $ps.BeginInvoke()
+        return [pscustomobject]@{ PowerShell = $ps; Runspace = $rs; Handle = $handle }
+    } catch {
+        # 心跳是監測，不是工作本身。開不起來就算了，不能讓它擋住跑測試。
+        return $null
+    }
+}
+
+function Stop-HeartbeatPulse {
+    param($Pulse)
+    if (-not $Pulse) { return }
+    try { $Pulse.PowerShell.Stop() } catch {}
+    try { $Pulse.PowerShell.Dispose() } catch {}
+    try { $Pulse.Runspace.Close(); $Pulse.Runspace.Dispose() } catch {}
+}
+
 function Invoke-WatcherRun {
     param(
         [Parameter(Mandatory)]$Store,
@@ -118,7 +165,12 @@ function Invoke-WatcherRun {
 
     $fetch = Update-PullRequestRef -RepoPath $RepoPath -Number ([int]$Target.Number) -Distro $Distro
     if ($fetch.Ok) {
-        $verdict = Invoke-ActRun -RepoPath $RepoPath -Sha $sha -Event $Event -Job $Job -LogDir $Store.Logs -TimeoutMs $TimeoutMs -Distro $Distro
+        $pulse = Start-HeartbeatPulse -Store $Store -Note "running $short"
+        try {
+            $verdict = Invoke-ActRun -RepoPath $RepoPath -Sha $sha -Event $Event -Job $Job -LogDir $Store.Logs -TimeoutMs $TimeoutMs -Distro $Distro
+        } finally {
+            Stop-HeartbeatPulse $pulse
+        }
     } else {
         $verdict = New-Verdict -Sha $sha -Repo $RepoPath -Event $Event -Outcome 'errored' -Note $fetch.Detail
         $verdict.FinishedAt = Get-IsoNow

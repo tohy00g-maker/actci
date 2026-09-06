@@ -70,6 +70,27 @@ Describe 'status / verdict / help' {
         $o.recent[0].trustworthy | Should -BeTrue
         $o.store | Should -Be $script:state
     }
+    It '執行中的心跳是 running 狀態，不算 stale（跑一輪十幾分鐘是正常的）' {
+        $s2 = Join-Path $TestDrive ('cli-run-' + [guid]::NewGuid().ToString('N'))
+        $st2 = Initialize-Store (New-Store -Path $s2)
+        # 手寫一份 20 分鐘前、備註 running 的心跳
+        $stamp = [DateTime]::UtcNow.AddMinutes(-20).ToString('o')
+        [System.IO.File]::WriteAllText($st2.Heartbeat, "$stamp`nrunning de109b3c`n", (New-Object System.Text.UTF8Encoding $false))
+        $o = (Invoke-Cli @('status', '--state', $s2, '--json')).Output | ConvertFrom-Json
+        $o.heartbeat.state | Should -Be 'running'
+        $o.heartbeat.runningSha | Should -Be 'de109b3c'
+        $o.heartbeat.stale | Should -BeFalse
+        (Invoke-Cli @('status', '--state', $s2)).Output | Should -Match '執行中 de109b3c'
+    }
+    It '閒置超過 5 分鐘才算 stale' {
+        $s3 = Join-Path $TestDrive ('cli-idle-' + [guid]::NewGuid().ToString('N'))
+        $st3 = Initialize-Store (New-Store -Path $s3)
+        $stamp = [DateTime]::UtcNow.AddMinutes(-20).ToString('o')
+        [System.IO.File]::WriteAllText($st3.Heartbeat, "$stamp`nlooking`n", (New-Object System.Text.UTF8Encoding $false))
+        $o = (Invoke-Cli @('status', '--state', $s3, '--json')).Output | ConvertFrom-Json
+        $o.heartbeat.state | Should -Be 'idle'
+        $o.heartbeat.stale | Should -BeTrue
+    }
     It 'status 人讀格式有 [ok] 標記，純 ASCII 不會在 cp950 主控台炸掉' {
         $r = Invoke-Cli @('status', '--state', $script:state)
         $r.Output | Should -Match '\[ok\] eeeeeeeeeeee'

@@ -217,6 +217,42 @@ Describe 'Start-WatcherLoop' {
     }
 }
 
+Describe '跑測試那十幾分鐘裡心跳要繼續跳' {
+    It 'Start-HeartbeatPulse 立刻寫一次，Stop 之後不再寫' {
+        $store = Initialize-Store (NewStore)
+        $pulse = Start-HeartbeatPulse -Store $store -Note 'running abc12345' -IntervalSeconds 1
+        try {
+            $deadline = (Get-Date).AddSeconds(10)
+            while ((Get-Date) -lt $deadline -and -not (Test-Path -LiteralPath $store.Heartbeat)) { Start-Sleep -Milliseconds 100 }
+            $age = Get-HeartbeatAge -Store $store
+            $age | Should -Not -BeNullOrEmpty
+            $age.Note | Should -Be 'running abc12345'
+            $age.Seconds | Should -BeLessThan 15
+        } finally { Stop-HeartbeatPulse $pulse }
+        # 停掉之後檔案不再更新
+        $before = (Get-Item -LiteralPath $store.Heartbeat).LastWriteTimeUtc
+        Start-Sleep -Seconds 3
+        (Get-Item -LiteralPath $store.Heartbeat).LastWriteTimeUtc | Should -Be $before
+    }
+    It 'Stop-HeartbeatPulse 收到 null 不會炸（Start 失敗時就是 null）' {
+        { Stop-HeartbeatPulse $null } | Should -Not -Throw
+    }
+    # 名稱不能有角括號：Pester 會把 <...> 當成 -ForEach 的樣板欄位去解析
+    It 'Invoke-WatcherRun 期間心跳的備註是 running 加短 sha' {
+        # act 執行中被記下的心跳，UI 與 CLI 都靠這個字串分辨「執行中」與「停了」
+        $store = Initialize-Store (NewStore)
+        Mock -ModuleName actci Invoke-Wsl { [pscustomobject]@{ ExitCode = 0; Output = ''; Error = '' } }
+        Mock -ModuleName actci Send-PendingStatus { [pscustomobject]@{ Posted = $true; State = 'pending'; Detail = '' } }
+        Mock -ModuleName actci Send-CommitStatus { [pscustomobject]@{ Posted = $true; State = 'success'; Detail = '' } }
+        Mock -ModuleName actci Invoke-ActRun {
+            param([string]$RepoPath, [string]$Sha)
+            (Get-HeartbeatAge -Store $store).Note | Should -Be 'running abcdef12'
+            New-Verdict -Sha $Sha -Repo '/r' -Outcome 'passed' -TestsRun 5
+        }
+        Invoke-WatcherRun -Store $store -Slug 'me/repo' -RepoPath '/r' -Target (Pull 1 ('abcdef12' + '0' * 32)) -Log { param($m) } | Out-Null
+    }
+}
+
 Describe 'Watcher 設定檔' {
     It '存了再讀回來，預設值補齊' {
         $store = NewStore
