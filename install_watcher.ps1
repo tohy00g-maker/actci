@@ -108,8 +108,15 @@ $settings = New-ScheduledTaskSettingsSet `
     -MultipleInstances IgnoreNew
 
 function Get-OldWatchers {
+    # 只認 watcher.ps1 本體：'*watcher.ps1*' 也會命中 install_watcher.ps1，2026-09-06 安裝器因此把自己
+    # 停掉，排程工作解除註冊之後沒有重新註冊。路徑分隔符放在前面，再排除自己的 PID。
     @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -and $_.CommandLine -like '*watcher.ps1*' -and $_.CommandLine -like "*$Slug*" })
+        Where-Object {
+            $_.CommandLine -and $_.ProcessId -ne $PID -and
+            $_.CommandLine -notlike '*install_watcher*' -and
+            ($_.CommandLine -like '*\watcher.ps1*' -or $_.CommandLine -like '*/watcher.ps1*') -and
+            $_.CommandLine -like "*$Slug*"
+        })
 }
 
 $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue

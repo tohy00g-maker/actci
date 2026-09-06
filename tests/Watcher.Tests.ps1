@@ -246,6 +246,12 @@ Describe '安裝器與入口腳本至少要能被解析' {
     It '安裝器守住 NextRunTime 那一條' {
         (Get-Content -Raw (Join-Path $PSScriptRoot '..\install_watcher.ps1')) | Should -Match 'NextRunTime'
     }
+    It '安裝器清舊行程時不會殺到自己或別的安裝器' {
+        $text = Get-Content -Raw (Join-Path $PSScriptRoot '..\install_watcher.ps1')
+        $text | Should -Match "-notlike '\*install_watcher\*'"
+        $text | Should -Match '\$_\.ProcessId -ne \$PID'
+        $text | Should -Not -Match "CommandLine -like '\*watcher\.ps1\*'"
+    }
     It '安裝器註冊前先試跑一圈' {
         $text = Get-Content -Raw (Join-Path $PSScriptRoot '..\install_watcher.ps1')
         $text.IndexOf('-Once') | Should -BeLessThan $text.IndexOf('Register-ScheduledTask')
