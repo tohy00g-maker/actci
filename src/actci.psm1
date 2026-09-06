@@ -3,7 +3,7 @@
 
 Set-StrictMode -Version Latest
 
-foreach ($file in @('Verdict.ps1', 'Parse.ps1', 'Store.ps1', 'Status.ps1', 'Wsl.ps1', 'Engine.ps1', 'GitHub.ps1')) {
+foreach ($file in @('Verdict.ps1', 'Parse.ps1', 'Store.ps1', 'Status.ps1', 'Wsl.ps1', 'Engine.ps1', 'GitHub.ps1', 'Watcher.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 
@@ -25,5 +25,8 @@ Export-ModuleMember -Function @(
     # Engine
     'Get-RepoHeadSha', 'Test-ActPreflight', 'New-ActCommand', 'Invoke-ActRun',
     # GitHub
-    'Invoke-Gh', 'Test-GhAuth', 'Send-CommitStatus', 'Send-PendingStatus', 'Get-OpenPullRequests'
+    'Invoke-Gh', 'Test-GhAuth', 'Send-CommitStatus', 'Send-PendingStatus', 'Get-OpenPullRequests',
+    # Watcher
+    'Get-WatcherConfigPath', 'Save-WatcherConfig', 'Get-WatcherConfig', 'Update-PullRequestRef',
+    'Invoke-WatcherRun', 'Invoke-WatcherTick', 'Start-WatcherLoop'
 )
