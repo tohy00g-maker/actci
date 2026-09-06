@@ -1,13 +1,16 @@
 ﻿# 透過 wsl.exe 在 Linux 發行版裡執行 bash 指令。視窗與 watcher 共用。
 #
-# 兩個 ActRunner 踩過的 wsl.exe 陷阱，別再踩：
+# 三個踩過的 wsl.exe 陷阱，別再踩：
 # 1. `-d` 後面的發行版名稱**不能加引號**。wsl.exe 不會去掉引號，會直接說找不到發行版。
 # 2. wsl.exe 自己的訊息（找不到發行版之類）是 UTF-16LE，而 Linux 程式的輸出是 UTF-8。
 #    這裡讀原始位元組，依零位元組比例判斷。
+# 3. `--` 後面的字串是**原封不動交給 Linux 的 shell**，不是走 Windows 的參數解析。
+#    用 Windows 雙引號包指令，外層 shell 會先把 $HOME、$PATH、$(…) 展開再交給 bash -lc
+#    —— PATH 裡的 "Program Files (x86)" 一展開就是語法錯誤。所以要用 bash 的單引號包。
 
 $script:WslDistro = 'Ubuntu'
 # ~/.local/bin 是不用 sudo 安裝 act 的位置；bash -lc 會讀 .profile 但那要目錄先存在。
-$script:BashPrefix = 'export PATH=$HOME/.local/bin:$PATH; '
+$script:BashPrefix = 'export PATH="$HOME/.local/bin:$PATH"; '
 
 function Get-WslDistro { return $script:WslDistro }
 function Set-WslDistro { param([Parameter(Mandatory)][string]$Name); $script:WslDistro = $Name }
@@ -69,7 +72,8 @@ function New-WslStartInfo {
     if (-not $Distro) { $Distro = $script:WslDistro }
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = 'wsl.exe'
-    $psi.Arguments = '-d ' + $Distro + ' -- bash -lc ' + (ConvertTo-WinArg $BashCommand)
+    # 見檔頭第 3 點：這裡是 bash 單引號，不是 ConvertTo-WinArg。
+    $psi.Arguments = '-d ' + $Distro + ' -- bash -lc ' + (ConvertTo-BashArg $BashCommand)
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $psi.WorkingDirectory = $env:SystemRoot   # 避免 WSL 對目前目錄 chdir 失敗的警告

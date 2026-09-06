@@ -38,10 +38,10 @@ Describe 'ConvertFrom-WslBytes' {
 }
 
 Describe 'New-WslStartInfo' {
-    It '發行版名稱不加引號，bash 指令加引號' {
-        $psi = New-WslStartInfo -BashCommand 'echo "hi there"' -Distro 'Ubuntu'
+    It '發行版名稱不加引號，bash 指令用單引號包（外層 shell 才不會先展開 $VAR）' {
+        $psi = New-WslStartInfo -BashCommand 'echo "$HOME" it''s' -Distro 'Ubuntu'
         $psi.FileName | Should -Be 'wsl.exe'
-        $psi.Arguments | Should -Be '-d Ubuntu -- bash -lc "echo \"hi there\""'
+        $psi.Arguments | Should -Be "-d Ubuntu -- bash -lc 'echo `"`$HOME`" it'\''s'"
     }
     It '沒指定就用模組預設的發行版' {
         Set-WslDistro 'Debian'
@@ -61,6 +61,11 @@ Describe 'Invoke-Wsl 真的呼叫（沒有 WSL 就跳過）' {
     }
     It '離開碼帶回來' -Skip:(-not $script:hasWsl) {
         (Invoke-Wsl -BashCommand 'exit 3' -TimeoutMs 60000).ExitCode | Should -Be 3
+    }
+    It '$PATH 裡有空白與括號也不會炸（就是 2026-09-06 那個 bug）' -Skip:(-not $script:hasWsl) {
+        $r = Invoke-Wsl -BashCommand 'export PATH="$HOME/.local/bin:$PATH"; x=$(echo sub); echo "ok $x"' -TimeoutMs 60000
+        $r.ExitCode | Should -Be 0
+        $r.Output | Should -Be 'ok sub'
     }
     It '找不到的發行版不丟例外，Error 可讀' -Skip:(-not $script:hasWsl) {
         $r = Invoke-Wsl -BashCommand 'true' -TimeoutMs 60000 -Distro 'no-such-distro-xyz'

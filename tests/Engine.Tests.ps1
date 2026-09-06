@@ -35,7 +35,7 @@ Describe 'New-ActCommand' {
         $cmd = New-ActCommand -RepoPath '/home/me/repo' -Sha 'abc1234' -Event 'push' -Job 'test'
         $cmd | Should -Match "git -C '/home/me/repo' archive --format=tar 'abc1234' \| tar -x -C"
         $cmd | Should -Match 'cd "\$tmp" && NO_COLOR=1 TERM=dumb act .push. -j .test. 2>&1; rc=\$\?; cd /; rm -rf "\$tmp"; exit \$rc$'
-        $cmd | Should -Match '^export PATH=\$HOME/.local/bin:\$PATH; '
+        $cmd | Should -Match '^export PATH="\$HOME/.local/bin:\$PATH"; '
     }
     It '沒 sha：直接 cd 進 repo' {
         $cmd = New-ActCommand -RepoPath '/home/me/repo' -Event 'pull_request'

@@ -23,7 +23,7 @@ Export-ModuleMember -Function @(
     'Get-WslDistro', 'Set-WslDistro', 'ConvertTo-BashArg', 'ConvertTo-WinArg', 'ConvertTo-WslPath',
     'ConvertFrom-WslBytes', 'New-WslStartInfo', 'Invoke-Wsl', 'Get-WslDistros',
     # Engine
-    'Get-RepoHeadSha', 'Test-ActPreflight', 'New-ActCommand', 'Invoke-ActRun',
+    'Get-RepoHeadSha', 'Test-ActPreflight', 'New-ActCommand', 'Invoke-ActRun', 'Complete-ActVerdict',
     # GitHub
     'Invoke-Gh', 'Test-GhAuth', 'Send-CommitStatus', 'Send-PendingStatus', 'Get-OpenPullRequests',
     # Watcher

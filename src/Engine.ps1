@@ -40,16 +40,17 @@ function Test-ActPreflight {
         'if [ -z "$v" ]; then echo __NODAEMON__; exit 0; fi; ' +
         'echo __OK__ $(act --version 2>&1 | head -1) docker $v'
     $r = Invoke-Wsl -BashCommand $cmd -TimeoutMs 60000 -Distro $Distro
+    # Code 給程式分支用（視窗依它點燈），Detail 給人看。別讓呼叫端去比對 Detail 的字。
     if ($r.ExitCode -ne 0 -or -not $r.Output) {
-        return [pscustomobject]@{ Ok = $false; Detail = "WSL 叫不動：$($r.Error) $($r.Output)".Trim() }
+        return [pscustomobject]@{ Ok = $false; Code = 'wsl'; Detail = "WSL 叫不動：$($r.Error) $($r.Output)".Trim() }
     }
     switch -Wildcard ($r.Output) {
-        '*__NOACT__*'    { return [pscustomobject]@{ Ok = $false; Detail = 'act 未安裝（WSL 內找不到 act）' } }
-        '*__NODOCKER__*' { return [pscustomobject]@{ Ok = $false; Detail = 'WSL 內找不到 docker，Docker Desktop 沒開或沒啟用 WSL integration' } }
-        '*__NODAEMON__*' { return [pscustomobject]@{ Ok = $false; Detail = 'docker 有指令但 daemon 沒回應，Docker Desktop 還在啟動或已停止' } }
-        '*__OK__*'       { return [pscustomobject]@{ Ok = $true; Detail = ($r.Output -replace '__OK__\s*', '').Trim() } }
+        '*__NOACT__*'    { return [pscustomobject]@{ Ok = $false; Code = 'noact';    Detail = 'act 未安裝（WSL 內找不到 act）' } }
+        '*__NODOCKER__*' { return [pscustomobject]@{ Ok = $false; Code = 'nodocker'; Detail = 'WSL 內找不到 docker，Docker Desktop 沒開或沒啟用 WSL integration' } }
+        '*__NODAEMON__*' { return [pscustomobject]@{ Ok = $false; Code = 'nodaemon'; Detail = 'docker 有指令但 daemon 沒回應，Docker Desktop 還在啟動或已停止' } }
+        '*__OK__*'       { return [pscustomobject]@{ Ok = $true;  Code = 'ok';       Detail = ($r.Output -replace '__OK__\s*', '').Trim() } }
     }
-    return [pscustomobject]@{ Ok = $false; Detail = "前置檢查回了看不懂的東西：$($r.Output)" }
+    return [pscustomobject]@{ Ok = $false; Code = 'unknown'; Detail = "前置檢查回了看不懂的東西：$($r.Output)" }
 }
 
 function New-ActCommand {
@@ -130,54 +131,72 @@ function Invoke-ActRun {
     $cmd = New-ActCommand -RepoPath $RepoPath -Sha $Sha -Event $Event -Job $Job -ExtraArgs $ExtraArgs -RawArgs $RawArgs
     $r = Invoke-Wsl -BashCommand $cmd -TimeoutMs $TimeoutMs -Distro $Distro
 
-    $verdict.Seconds = $started.Elapsed.TotalSeconds
-    $verdict.FinishedAt = Get-IsoNow
-    $output = ($r.Output + "`n" + $r.Error).Trim()
-    $lines = ConvertFrom-ActOutput $output
-    $verdict.Steps = @((New-VerdictStep -Name 'act' -ExitCode $r.ExitCode -Seconds $verdict.Seconds))
+    return Complete-ActVerdict -Verdict $verdict -ExitCode $r.ExitCode -Output $r.Output -ErrorText $r.Error `
+        -Sha $Sha -TimeoutMs $TimeoutMs -LogDir $LogDir -Seconds $started.Elapsed.TotalSeconds
+}
+
+function Complete-ActVerdict {
+    # 把 act 的結果（離開碼與輸出）填進判定。Invoke-ActRun 與視窗的串流執行共用，
+    # 兩邊的結果分類才不會漸漸長成兩套。
+    param(
+        [Parameter(Mandatory)]$Verdict,
+        [Parameter(Mandatory)][int]$ExitCode,
+        [AllowEmptyString()][string]$Output = '',
+        [AllowEmptyString()][string]$ErrorText = '',
+        [string]$Sha = '',
+        [int]$TimeoutMs = 3600000,
+        [string]$LogDir = '',
+        [double]$Seconds = 0
+    )
+    $Verdict.Seconds = $Seconds
+    $Verdict.FinishedAt = Get-IsoNow
+    $text = ($Output + "`n" + $ErrorText).Trim()
+    $lines = ConvertFrom-ActOutput $text
+    $Verdict.Steps = @((New-VerdictStep -Name 'act' -ExitCode $ExitCode -Seconds $Seconds))
 
     if ($LogDir) {
         try {
             if (-not (Test-Path -LiteralPath $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+            $labelSha = [string]$Verdict.Sha
             $logPath = Join-Path $LogDir ($labelSha.Substring(0, [Math]::Min(12, $labelSha.Length)) + '.log')
-            [System.IO.File]::WriteAllText($logPath, $output + "`n", (New-Object System.Text.UTF8Encoding $false))
-            $verdict.LogPath = $logPath
+            [System.IO.File]::WriteAllText($logPath, $text + "`n", (New-Object System.Text.UTF8Encoding $false))
+            $Verdict.LogPath = $logPath
         } catch {
             $note = "日誌寫不進去：$($_.Exception.Message)"
-            $verdict.Note = ($verdict.Note + ' ' + $note).Trim()
+            $Verdict.Note = ($Verdict.Note + ' ' + $note).Trim()
         }
     }
 
-    $tests = Get-TestsRun $output
-    $verdict.TestsRun = $tests.Count
-    $verdict.TestsSource = $tests.Sources
+    $tests = Get-TestsRun $text
+    $Verdict.TestsRun = $tests.Count
+    $Verdict.TestsSource = $tests.Sources
 
-    if ($r.ExitCode -eq -1 -and $r.Error -like '逾時*') {
-        $verdict.Outcome = 'errored'
-        $verdict.Note = ('超過 {0} 秒還沒跑完' -f [int]($TimeoutMs / 1000))
-        return $verdict
+    if ($ExitCode -eq -1 -and $ErrorText -like '逾時*') {
+        $Verdict.Outcome = 'errored'
+        $Verdict.Note = ('超過 {0} 秒還沒跑完' -f [int]($TimeoutMs / 1000))
+        return $Verdict
     }
-    if ($r.ExitCode -eq 98 -or $output -like '*__ARCHIVE_FAILED__*') {
-        $verdict.Outcome = 'errored'
-        $verdict.Note = "git archive $Sha 失敗：" + (Get-LastMeaningfulLine ($lines | Where-Object { $_ -notlike '*__ARCHIVE_FAILED__*' }))
-        return $verdict
+    if ($ExitCode -eq 98 -or $text -like '*__ARCHIVE_FAILED__*') {
+        $Verdict.Outcome = 'errored'
+        $Verdict.Note = "git archive $Sha 失敗：" + (Get-LastMeaningfulLine @($lines | Where-Object { $_ -notlike '*__ARCHIVE_FAILED__*' }))
+        return $Verdict
     }
-    if ($r.ExitCode -eq 0) {
-        $verdict.Outcome = 'passed'
-        return $verdict
+    if ($ExitCode -eq 0) {
+        $Verdict.Outcome = 'passed'
+        return $Verdict
     }
-    if ($script:ActInfraRegex.IsMatch($output)) {
-        $verdict.Outcome = 'errored'
-        $verdict.Note = Get-LastMeaningfulLine @($lines | Where-Object { $script:ActInfraRegex.IsMatch($_) })
-        return $verdict
+    if ($script:ActInfraRegex.IsMatch($text)) {
+        $Verdict.Outcome = 'errored'
+        $Verdict.Note = Get-LastMeaningfulLine @($lines | Where-Object { $script:ActInfraRegex.IsMatch($_) })
+        return $Verdict
     }
-    if ($script:ActStepFailedRegex.IsMatch($output) -or $tests.Count -gt 0) {
+    if ($script:ActStepFailedRegex.IsMatch($text) -or $tests.Count -gt 0) {
         # 有 step 失敗的痕跡、或測試真的跑了 —— 那是被測程式碼的問題。
-        $verdict.Outcome = 'failed'
-        return $verdict
+        $Verdict.Outcome = 'failed'
+        return $Verdict
     }
-    $verdict.Outcome = 'errored'
+    $Verdict.Outcome = 'errored'
     $last = Get-LastMeaningfulLine $lines
-    $verdict.Note = if ($last) { $last } else { "離開碼 $($r.ExitCode)" }
-    return $verdict
+    $Verdict.Note = if ($last) { $last } else { "離開碼 $ExitCode" }
+    return $Verdict
 }
