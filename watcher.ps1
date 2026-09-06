@@ -43,7 +43,9 @@ try {
 
 function Write-Line([string]$Message) {
     $line = '{0}  {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
-    Write-Output $line
+    # Write-Host，不是 Write-Output：這支函式是被 watcher 迴圈當 -Log 呼叫的，Write-Output 會把
+    # 日誌字串混進迴圈的回傳值，$result 就變成一個陣列，找不到 .Action（2026-09-06 第一次安裝踩到）。
+    Write-Host $line
     try { Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8 } catch {}
 }
 

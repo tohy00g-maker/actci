@@ -186,6 +186,12 @@ Describe 'Start-WatcherLoop' {
         $r.Action | Should -Be 'nothing-to-do'
         $script:sleeps.Count | Should -Be 0
     }
+    It '-Log 用 Write-Output 也不會弄壞回傳值（第一次安裝踩到的）' {
+        Mock -ModuleName actci Get-OpenPullRequests { [pscustomobject]@{ Pulls = @(); Problem = '' } }
+        $r = Start-WatcherLoop -Store $script:store -Slug 'me/repo' -RepoPath '/r' -Once -Sleeper $script:sleeper -Log { param($m) Write-Output "LOG $m" }
+        $r -is [hashtable] | Should -BeTrue
+        $r.Action | Should -Be 'nothing-to-do'
+    }
     It '一圈掛了不會停，記一行後繼續，睡 IntervalSeconds' {
         $script:n = 0
         Mock -ModuleName actci Get-OpenPullRequests {

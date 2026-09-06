@@ -96,8 +96,24 @@ Describe 'Invoke-ActRun' {
         $script:calls[1] | Should -Match "archive --format=tar 'abcdef1234567890'"
     }
 
+    It 'act 離開碼 0 但所有 job 因平台不支援被跳過：errored，不是通過（2026-09-06 example-app 實測）' {
+        $skipped = "[Self-hosted checks/validate] 🚧  Skipping unsupported platform -- Try running with ``-P self-hosted=...```n[Self-hosted checks/validate] 🚧  Skipping unsupported platform -- Try running with ``-P windows=...``"
+        $script:wslScript = { param($c) if ($c -like '*command -v act*') { Fake 0 '__OK__' } else { Fake 0 $skipped } }
+        $v = Invoke-ActRun -RepoPath '/r' -Sha 'abc1234' -Event 'pull_request'
+        $v.Outcome | Should -Be 'errored'
+        $v.Note | Should -Match 'runs-on'
+        Get-StatusState $v | Should -Be 'error'
+    }
+
+    It 'act 離開碼 0 但事件對不到任何 workflow：errored 並點名事件' {
+        $script:wslScript = { param($c) if ($c -like '*command -v act*') { Fake 0 '__OK__' } else { Fake 0 'time="x" level=info msg="Using docker host"' } }
+        $v = Invoke-ActRun -RepoPath '/r' -Sha 'abc1234' -Event 'release'
+        $v.Outcome | Should -Be 'errored'
+        $v.Note | Should -Match 'release'
+    }
+
     It '通過但 0 支：passed 卻不 trustworthy' {
-        $script:wslScript = { param($c) if ($c -like '*command -v act*') { Fake 0 '__OK__' } else { Fake 0 "[CI/build] ⭐ Run Main npm run build`n[CI/build] 🏁  Job succeeded" } }
+        $script:wslScript = { param($c) if ($c -like '*command -v act*') { Fake 0 '__OK__' } else { Fake 0 "[CI/build] ⭐ Run Main npm run build`n[CI/build]   ✅  Success - Main npm run build`n[CI/build] 🏁  Job succeeded" } }
         $v = Invoke-ActRun -RepoPath '/r' -Sha 'abc1234'
         $v.Outcome | Should -Be 'passed'
         $v.TestsRun | Should -Be 0

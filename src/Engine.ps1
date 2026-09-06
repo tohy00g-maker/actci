@@ -190,6 +190,17 @@ function Complete-ActVerdict {
         return $Verdict
     }
     if ($ExitCode -eq 0) {
+        # act 離開碼 0 但根本沒有 job 跑完：事件對不到任何 workflow，或 runs-on 全被跳過。
+        # 那是 CI 設定的問題，要講清楚，不能變成「通過但 0 支」讓人去找不存在的測試問題。
+        if ($text -notmatch '🏁\s+Job succeeded') {
+            $Verdict.Outcome = 'errored'
+            if ($text -match 'Skipping unsupported platform') {
+                $Verdict.Note = '沒有任何 job 跑完：runs-on 的平台 act 不支援（self-hosted / windows / macos），換一個事件或用 -P 對應映像'
+            } else {
+                $Verdict.Note = "沒有任何 job 跑完：事件 $($Verdict.Event) 對不到任何 workflow 的 on:"
+            }
+            return $Verdict
+        }
         $Verdict.Outcome = 'passed'
         return $Verdict
     }

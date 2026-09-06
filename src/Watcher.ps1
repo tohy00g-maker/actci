@@ -189,7 +189,10 @@ function Start-WatcherLoop {
     $ticks = 0
     while ($true) {
         try {
-            $result = Invoke-WatcherTick -Store $Store -Slug $Slug -RepoPath $RepoPath -Event $Event -Distro $Distro -TimeoutMs $TimeoutMs -Log $Log
+            # 只留 hashtable：呼叫端給的 -Log 若用 Write-Output，字串會混進來，這裡濾掉。
+            $result = @(Invoke-WatcherTick -Store $Store -Slug $Slug -RepoPath $RepoPath -Event $Event -Distro $Distro -TimeoutMs $TimeoutMs -Log $Log) |
+                Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
+            if ($null -eq $result) { $result = @{ Action = 'crashed'; Error = '這一圈沒有回傳結果' } }
         } catch {
             & $Log "這一圈掛了：$($_.Exception.GetType().Name): $($_.Exception.Message)"
             $result = @{ Action = 'crashed'; Error = $_.Exception.Message }
