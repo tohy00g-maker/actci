@@ -105,7 +105,7 @@ function New-Button($text, $x, $y, $w, $h = 28) {
     $b = New-Object System.Windows.Forms.Button
     $b.Text = $text; $b.Location = New-Object System.Drawing.Point($x, $y); $b.Size = New-Object System.Drawing.Size($w, $h)
     $b.AutoSize = $true; $b.AutoSizeMode = 'GrowOnly'; $b.MinimumSize = New-Object System.Drawing.Size($w, $h)
-    $b.Padding = New-Object System.Windows.Forms.Padding(8, 0, 8, 0)
+    $b.Padding = New-Object System.Windows.Forms.Padding(12, 0, 12, 0)
     return $b
 }
 function New-Flow($x, $y, $w, $h) {
@@ -226,18 +226,18 @@ function Log-Error([string]$t) { Append-Log "[actci] $t`n" ([System.Drawing.Colo
 # 分頁二：監看
 # ---------------------------------------------------------------------------
 $grpBeat = New-Object System.Windows.Forms.GroupBox
-$grpBeat.Text = 'watcher 心跳'; $grpBeat.Location = New-Object System.Drawing.Point(10, 10); $grpBeat.Size = New-Object System.Drawing.Size(340, 110)
-$lblBeat = New-Block '從來沒有' 14 26 310 40
+$grpBeat.Text = "watcher 心跳（store $($script:Store.Root)）"; $grpBeat.Location = New-Object System.Drawing.Point(10, 10); $grpBeat.Size = New-Object System.Drawing.Size(440, 110)
+$lblBeat = New-Block '從來沒有' 14 26 410 40
 $lblBeat.Font = New-Object System.Drawing.Font('Microsoft JhengHei UI', 16, [System.Drawing.FontStyle]::Bold); $lblBeat.ForeColor = $Gray
-$lblBeatNote = New-Block 'watcher 沒被啟動過' 14 70 310 30; $lblBeatNote.ForeColor = $Gray
+$lblBeatNote = New-Block 'watcher 沒被啟動過' 14 70 410 34; $lblBeatNote.ForeColor = $Gray
 $grpBeat.Controls.AddRange(@($lblBeat, $lblBeatNote))
 $tabWatch.Controls.Add($grpBeat)
 
 $grpCfg = New-Object System.Windows.Forms.GroupBox
-$grpCfg.Text = 'watcher 設定與排程工作'; $grpCfg.Location = New-Object System.Drawing.Point(360, 10); $grpCfg.Size = New-Object System.Drawing.Size(($W - 370), 110)
+$grpCfg.Text = 'watcher 設定與排程工作'; $grpCfg.Location = New-Object System.Drawing.Point(460, 10); $grpCfg.Size = New-Object System.Drawing.Size(($W - 470), 110)
 $grpCfg.Anchor = $AnchorTLR
-$lblCfg = New-Block '尚未安裝。按「安裝 / 更新 watcher…」。' 14 22 ($W - 400) 44; $lblCfg.Anchor = $AnchorTLR
-$lblTask = New-Block '' 14 66 ($W - 400) 40; $lblTask.Anchor = $AnchorTLR; $lblTask.ForeColor = $Gray
+$lblCfg = New-Block '尚未安裝。按「安裝 / 更新 watcher…」。' 14 22 ($W - 500) 44; $lblCfg.Anchor = $AnchorTLR
+$lblTask = New-Block '' 14 66 ($W - 500) 40; $lblTask.Anchor = $AnchorTLR; $lblTask.ForeColor = $Gray
 $grpCfg.Controls.AddRange(@($lblCfg, $lblTask))
 $tabWatch.Controls.Add($grpCfg)
 
@@ -587,6 +587,12 @@ function Refresh-Heartbeat {
     $s = [int][Math]::Round($age.Seconds)
     $interval = if ($script:WatchCfg -and $script:WatchCfg.IntervalSeconds) { [int]$script:WatchCfg.IntervalSeconds } else { 60 }
     $lblBeat.Text = if ($s -lt 120) { "$s 秒前" } elseif ($s -lt 7200) { "$([int]($s / 60)) 分鐘前" } else { "$([int]($s / 3600)) 小時前" }
+    # 心跳很久沒跳但排程工作卻在 Running：多半是這個視窗讀的 store 跟 watcher 寫的不是同一個
+    # （例如程式是 store 搬家之前開的）。講出來，不然看起來像 watcher 死了。
+    if ($s -gt $script:StaleAfter -and $script:WatchCfg -and $script:WatchCfg.PSObject.Properties['TaskName']) {
+        $t = Get-ScheduledTask -TaskName $script:WatchCfg.TaskName -ErrorAction SilentlyContinue
+        if ($t -and $t.State -eq 'Running') { $lblBeatNote.Text = "排程工作在跑但這裡沒看到心跳：這個視窗讀的是 $($script:Store.Root)，可能是舊位置。重開視窗試試。"; $lblBeatNote.ForeColor = $Orange; return }
+    }
     if ($s -le 2 * $interval) { $lblBeat.ForeColor = $Green; $lblBeatNote.Text = "在動：$($age.Note)"; $lblBeatNote.ForeColor = $Green }
     elseif ($s -le $script:StaleAfter) { $lblBeat.ForeColor = $Orange; $lblBeatNote.Text = "有點久了：$($age.Note)"; $lblBeatNote.ForeColor = $Orange }
     else { $lblBeat.ForeColor = $Red; $lblBeatNote.Text = "太久了，watcher 可能停了（上次：$($age.Note)）"; $lblBeatNote.ForeColor = $Red }
