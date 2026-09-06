@@ -3,9 +3,13 @@
 #     powershell -NoProfile -ExecutionPolicy Bypass -File actci-cli.ps1 <command> [args] [--json]
 #
 # 指令與離開碼：
-#   gate <sha>                    這個 commit 有一份值得相信的通過嗎？ 0 = 有；1 = 有判定但不可信；2 = 沒有判定
+#   gate <sha>                    這個 commit 有一份值得相信的通過嗎？
+#                                 0 = 有，可以合併
+#                                 1 = 有判定但不可信（0 支測試、測試紅了、CI 自己出錯）—— 不要合併
+#                                 2 = 還沒判定，而 watcher 活著 —— 等它，一輪約 8 到 11 分鐘
+#                                 3 = 還沒判定，而 watcher 沒在動 —— 等下去沒有意義，去修 CI
 #   verdict <sha>                 印出判定（--json 給完整 JSON）。沒有 → 2
-#   status [--limit N]            心跳幾秒前 + 最近判定。永遠 0，因為「現在的狀態」不是成功或失敗
+#   status [--limit N]            watcher 健康狀態 + 最近判定。永遠 0，因為「現在的狀態」不是成功或失敗
 #   run <repo> [--sha S] [--event E] [--job J] [--save] [--push owner/repo] [--context C]
 #                                 用 act 跑一次，印判定。0 = 值得相信的通過；1 = 其他。--save 存進 store，
 #                                 --push 推 commit status（context 預設 actci/manual）
@@ -77,12 +81,32 @@ switch ($Command.ToLower()) {
         $sha = $positional[0]
         $v = Get-StoredVerdict -Store $store -Sha $sha -WarningAction SilentlyContinue
         if ($null -eq $v) {
-            Out-Result ([ordered]@{ sha = $sha; verdict = $null; trustworthy = $false; exitCode = 2 }) "$($sha.Substring(0, [Math]::Min(12, $sha.Length))) 沒有判定紀錄"
-            exit 2
+            # 沒有判定分兩種，對呼叫端的意思相反：watcher 活著就是「還沒輪到」，該等；
+            # watcher 沒在動就是「等下去沒有意義」，該去修 CI。合成一個離開碼會讓 agent 永遠等下去。
+            $health = Get-WatcherHealth -Store $store
+            $short = $sha.Substring(0, [Math]::Min(12, $sha.Length))
+            if ($health.Alive) {
+                $code = 2
+                $human = if ($health.RunningSha -and $sha.StartsWith($health.RunningSha)) {
+                    "$short 正在判定中（已經 $([int]($health.SecondsAgo / 60)) 分鐘），等它跑完"
+                } else {
+                    "$short 還沒判定，watcher $($health.Detail) —— 等它接走"
+                }
+            } else {
+                $code = 3
+                $human = "$short 沒有判定，而且 actci 沒在動：$($health.Detail)。等下去沒有意義。"
+            }
+            $obj = [ordered]@{
+                sha = $sha; verdict = $null; trustworthy = $false; exitCode = $code
+                watcher = [ordered]@{ state = $health.State; alive = $health.Alive; secondsAgo = $health.SecondsAgo; runningSha = $health.RunningSha; detail = $health.Detail }
+            }
+            Out-Result $obj $human
+            exit $code
         }
         $ok = Test-VerdictTrustworthy $v
         $code = if ($ok) { 0 } else { 1 }
         $s = Get-VerdictSummary $v; $s.exitCode = $code
+        $s.watcher = $null
         Out-Result $s (Get-VerdictHeadline $v)
         exit $code
     }
@@ -100,16 +124,14 @@ switch ($Command.ToLower()) {
         $age = Get-HeartbeatAge -Store $store
         $cfg = Get-WatcherConfig -Store $store
         $recent = @(Get-RecentVerdicts -Store $store -Limit $limit -WarningAction SilentlyContinue)
-        # running = 正在跑某個 sha 的判定；idle = 在輪詢等事情做。stale 只對 idle 有意義。
-        $beat = if ($age) {
-            $isRunning = $age.Note -like 'running *'
-            [ordered]@{
-                secondsAgo = [Math]::Round($age.Seconds); note = $age.Note; at = $age.At.ToString('o')
-                state = $(if ($isRunning) { 'running' } else { 'idle' })
-                runningSha = $(if ($isRunning) { ($age.Note -replace '^running\s*', '') } else { $null })
-                stale = $(if ($isRunning) { $age.Seconds -gt 3600 } else { $age.Seconds -gt 300 })
-            }
-        } else { $null }
+        # 健康狀態的定義只有一份，跟 gate 用的是同一支 Get-WatcherHealth。
+        $health = Get-WatcherHealth -Store $store
+        $beat = [ordered]@{
+            state = $health.State; alive = $health.Alive; secondsAgo = $health.SecondsAgo
+            runningSha = $health.RunningSha; detail = $health.Detail
+            note = $(if ($age) { $age.Note } else { $null }); at = $(if ($age) { $age.At.ToString('o') } else { $null })
+            stale = (-not $health.Alive)
+        }
         $obj = [ordered]@{
             store = $store.Root
             heartbeat = $beat
@@ -118,13 +140,7 @@ switch ($Command.ToLower()) {
         }
         $lines = New-Object System.Collections.Generic.List[string]
         $lines.Add("store：$($store.Root)")
-        if (-not $age) { $lines.Add('心跳：從來沒有 —— watcher 沒被啟動過') }
-        elseif ($age.Note -like 'running *') {
-            # 正在跑測試不是安靜。這時的門檻是那一輪的時限，不是幾秒沒動。
-            $over = $age.Seconds -gt 3600
-            $lines.Add(('心跳：執行中 {0}，已經 {1:0} 秒{2}' -f ($age.Note -replace '^running\s*', ''), $age.Seconds, $(if ($over) { '  ** 超過一小時，可能卡住了 **' } else { '' })))
-        }
-        else { $stale = $age.Seconds -gt 300; $lines.Add(('心跳：{0:0} 秒前（{1}）{2}' -f $age.Seconds, $age.Note, $(if ($stale) { '  ** 太久了，watcher 可能停了 **' } else { '' }))) }
+        $lines.Add("心跳：$($health.Detail)" + $(if (-not $health.Alive) { '  ** actci 沒在動 **' } else { '' }))
         if ($cfg) { $lines.Add("watcher：$($cfg.Slug) 事件 $($cfg.Event) $(if ($cfg.PSObject.Properties['Job'] -and $cfg.Job) { "job $($cfg.Job)" }) 每 $($cfg.IntervalSeconds) 秒") }
         if ($recent.Count -eq 0) { $lines.Add('還沒有任何判定。') }
         foreach ($v in $recent) {

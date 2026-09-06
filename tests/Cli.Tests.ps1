@@ -24,10 +24,38 @@ Describe 'gate' {
         $script:state = Join-Path $TestDrive ('cli-' + [guid]::NewGuid().ToString('N'))
         $script:store = Initialize-Store (New-Store -Path $script:state)
     }
-    It '沒有判定 → 2' {
+    It '沒有判定但 watcher 活著 → 2（該等）' {
+        Write-Heartbeat -Store $script:store -Note 'looking'
         $r = Invoke-Cli @('gate', ('a' * 40), '--state', $script:state)
         $r.ExitCode | Should -Be 2
-        $r.Output | Should -Match '沒有判定紀錄'
+        $r.Output | Should -Match '還沒判定'
+    }
+    It '沒有判定而且 watcher 沒在動 → 3（等下去沒有意義）' {
+        # 心跳從來沒跳過：watcher 沒被安裝或沒啟動
+        $r = Invoke-Cli @('gate', ('a' * 40), '--state', $script:state, '--json')
+        $r.ExitCode | Should -Be 3
+        $o = $r.Output | ConvertFrom-Json
+        $o.watcher.state | Should -Be 'never'
+        $o.watcher.alive | Should -BeFalse
+    }
+    It '心跳過期 → 3，不是 2' {
+        $stamp = [DateTime]::UtcNow.AddMinutes(-20).ToString('o')
+        [System.IO.File]::WriteAllText($script:store.Heartbeat, "$stamp`nlooking`n", (New-Object System.Text.UTF8Encoding $false))
+        $r = Invoke-Cli @('gate', ('a' * 40), '--state', $script:state, '--json')
+        $r.ExitCode | Should -Be 3
+        ($r.Output | ConvertFrom-Json).watcher.state | Should -Be 'stale'
+    }
+    It '正在跑這個 sha → 2 並且說正在判定中' {
+        $sha = 'a' * 40
+        Write-Heartbeat -Store $script:store -Note ('running ' + $sha.Substring(0, 8))
+        $r = Invoke-Cli @('gate', $sha, '--state', $script:state)
+        $r.ExitCode | Should -Be 2
+        $r.Output | Should -Match '正在判定中'
+    }
+    It '判定存在時不看 watcher 健康（已經有答案了）' {
+        Save-Verdict $script:store (New-Verdict -Sha ('9' * 40) -Repo '/r' -Outcome 'passed' -TestsRun 3) | Out-Null
+        # 心跳從來沒跳過，但判定在，照樣回 0
+        (Invoke-Cli @('gate', ('9' * 40), '--state', $script:state)).ExitCode | Should -Be 0
     }
     It '值得相信的通過 → 0，--json 有 trustworthy=true' {
         Save-Verdict $script:store (New-Verdict -Sha ('b' * 40) -Repo '/r' -Outcome 'passed' -TestsRun 12 -TestsSource @('pytest')) | Out-Null
@@ -80,7 +108,7 @@ Describe 'status / verdict / help' {
         $o.heartbeat.state | Should -Be 'running'
         $o.heartbeat.runningSha | Should -Be 'de109b3c'
         $o.heartbeat.stale | Should -BeFalse
-        (Invoke-Cli @('status', '--state', $s2)).Output | Should -Match '執行中 de109b3c'
+        (Invoke-Cli @('status', '--state', $s2)).Output | Should -Match '正在跑 de109b3c'
     }
     It '閒置超過 5 分鐘才算 stale' {
         $s3 = Join-Path $TestDrive ('cli-idle-' + [guid]::NewGuid().ToString('N'))
@@ -88,8 +116,18 @@ Describe 'status / verdict / help' {
         $stamp = [DateTime]::UtcNow.AddMinutes(-20).ToString('o')
         [System.IO.File]::WriteAllText($st3.Heartbeat, "$stamp`nlooking`n", (New-Object System.Text.UTF8Encoding $false))
         $o = (Invoke-Cli @('status', '--state', $s3, '--json')).Output | ConvertFrom-Json
-        $o.heartbeat.state | Should -Be 'idle'
+        $o.heartbeat.state | Should -Be 'stale'
+        $o.heartbeat.alive | Should -BeFalse
         $o.heartbeat.stale | Should -BeTrue
+    }
+    It '剛跳過的心跳是 idle 且 alive' {
+        $s4 = Join-Path $TestDrive ('cli-live-' + [guid]::NewGuid().ToString('N'))
+        $st4 = Initialize-Store (New-Store -Path $s4)
+        Write-Heartbeat -Store $st4 -Note 'looking'
+        $o = (Invoke-Cli @('status', '--state', $s4, '--json')).Output | ConvertFrom-Json
+        $o.heartbeat.state | Should -Be 'idle'
+        $o.heartbeat.alive | Should -BeTrue
+        $o.heartbeat.stale | Should -BeFalse
     }
     It 'status 人讀格式有 [ok] 標記，純 ASCII 不會在 cp950 主控台炸掉' {
         $r = Invoke-Cli @('status', '--state', $script:state)

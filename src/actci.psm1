@@ -29,5 +29,5 @@ Export-ModuleMember -Function @(
     # Watcher
     'Get-WatcherConfigPath', 'Save-WatcherConfig', 'Get-WatcherConfig', 'Update-PullRequestRef', 'Test-VerdictStored',
     'Invoke-WatcherRun', 'Invoke-WatcherTick', 'Start-WatcherLoop',
-    'Start-HeartbeatPulse', 'Stop-HeartbeatPulse'
+    'Start-HeartbeatPulse', 'Stop-HeartbeatPulse', 'Get-WatcherHealth'
 )

@@ -39,7 +39,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File actci-cli.ps1 <command> [arg
 
 | 指令 | 做什麼 | 離開碼 |
 |---|---|---|
-| `gate <sha>` | 這個 commit 有值得相信的通過嗎？合併門檻問這個 | 0 有；1 有判定但不可信（含 passed 但 0 支）；2 沒有判定 |
+| `gate <sha>` | 這個 commit 有值得相信的通過嗎？合併門檻問這個 | 0 可以合併；1 有判定但不可信（0 支、測試紅了、CI 出錯）；2 還沒判定但 watcher 活著，該等；3 還沒判定而且 watcher 沒在動，等下去沒有意義 |
 | `verdict <sha>` | 印判定，`--json` 是完整判定檔（含 `Jobs`：act 實際跑了哪幾支 workflow/job、各自狀態與測試數；`TestsRun` 是它們的加總） | 0；2 沒有 |
 | `status [--limit N]` | 心跳幾秒前、watcher 設定、最近判定 | 永遠 0 |
 | `run <repo> [--sha S] [--event E] [--job J] [--save] [--push owner/repo] [--context C]` | 用 act 跑一次；`--save` 存進 store，`--push` 推 status（預設 context `actci/manual`） | 0 值得相信的通過；1 其他 |
@@ -50,6 +50,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File actci-cli.ps1 <command> [arg
 
 一個 agent 典型的用法：`prs` 看哪個 PR 還沒判定 → 等 watcher 或自己 `run --sha … --save --push` → 合併前 `gate <sha>`，
 只有離開碼 0 才合併。**不要**自己去讀 headline 判斷「看起來有過」，那正是 gate 存在的理由。
+
+2 與 3 分開是刻意的。沒有判定有兩種原因，而它們對呼叫端的意思完全相反：還沒輪到就該等，CI 死了就該去修。
+合成一個碼的話，一個 agent 面對停擺的 CI 只會一直等下去 —— 那正是 localci 誕生的那次事故的形狀。
+`gate --json` 的 `watcher` 欄位會說是哪一種（never / idle / running / stale / stuck）。
 
 ## 需求
 

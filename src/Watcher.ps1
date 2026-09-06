@@ -57,6 +57,43 @@ function Get-WatcherConfig {
 }
 
 $script:RetryErroredAfterMinutes = 30
+$script:HeartbeatStaleSeconds = 300      # 閒置這麼久沒跳，watcher 大概停了
+$script:RunStuckSeconds = 3600           # 同一個 sha 跑這麼久，大概卡住了
+
+function Get-WatcherHealth {
+    # watcher 現在是活的嗎？回 @{ State; Alive; SecondsAgo; RunningSha; Detail }。
+    #
+    # 這一支存在的理由：`gate <sha>` 沒有判定時，「還沒輪到它」跟「CI 已經死了」是兩件事，
+    # 而它們對呼叫端的意思完全相反 —— 一個該等，一個等下去沒有意義。2026-09-06 之前
+    # 兩者都回離開碼 2，於是一個 agent 面對死掉的 CI 只會一直等下去。這正是 localci 那次
+    # 「runner 停擺 90 分鐘而每個人都以為它在排隊」的形狀，只是換到我們自己身上。
+    #
+    # State：never（從來沒跳過）、running（正在跑某個 sha）、idle（在輪詢）、
+    #        stale（閒置太久）、stuck（同一個 sha 跑太久）。
+    param([Parameter(Mandatory)]$Store, [DateTime]$Now = [DateTime]::UtcNow)
+
+    $age = Get-HeartbeatAge -Store $Store -Now $Now
+    if (-not $age) {
+        return [pscustomobject]@{ State = 'never'; Alive = $false; SecondsAgo = $null; RunningSha = ''
+                                  Detail = 'watcher 從來沒有跳過心跳 —— 沒被安裝或沒被啟動過' }
+    }
+    $s = [Math]::Round($age.Seconds)
+    if ($age.Note -like 'running *') {
+        $sha = ($age.Note -replace '^running\s*', '')
+        if ($age.Seconds -gt $script:RunStuckSeconds) {
+            return [pscustomobject]@{ State = 'stuck'; Alive = $false; SecondsAgo = $s; RunningSha = $sha
+                                      Detail = "watcher 卡在 $sha 已經 $([int]($s / 60)) 分鐘，超過一小時" }
+        }
+        return [pscustomobject]@{ State = 'running'; Alive = $true; SecondsAgo = $s; RunningSha = $sha
+                                  Detail = "正在跑 $sha（$([int]($s / 60)) 分鐘）" }
+    }
+    if ($age.Seconds -gt $script:HeartbeatStaleSeconds) {
+        return [pscustomobject]@{ State = 'stale'; Alive = $false; SecondsAgo = $s; RunningSha = ''
+                                  Detail = "心跳 $s 秒沒更新，watcher 可能停了" }
+    }
+    return [pscustomobject]@{ State = 'idle'; Alive = $true; SecondsAgo = $s; RunningSha = ''
+                              Detail = "在輪詢（$s 秒前）" }
+}
 
 function Test-VerdictStored {
     # 「已判定」= 有判定檔，而且不是一份放太久的 errored。

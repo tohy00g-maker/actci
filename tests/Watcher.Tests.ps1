@@ -253,6 +253,38 @@ Describe '跑測試那十幾分鐘裡心跳要繼續跳' {
     }
 }
 
+Describe 'Get-WatcherHealth：活著還是死了' {
+    BeforeEach { $script:hstore = Initialize-Store (NewStore) }
+    function script:SetBeat([string]$note, [int]$minutesAgo) {
+        $stamp = [DateTime]::UtcNow.AddMinutes(-$minutesAgo).ToString('o')
+        [System.IO.File]::WriteAllText($script:hstore.Heartbeat, "$stamp`n$note`n", (New-Object System.Text.UTF8Encoding $false))
+    }
+    It '沒有心跳檔 → never，不是活的' {
+        $h = Get-WatcherHealth -Store $script:hstore
+        $h.State | Should -Be 'never'; $h.Alive | Should -BeFalse
+    }
+    It '剛跳過而且在輪詢 → idle，活的' {
+        SetBeat 'looking' 0
+        $h = Get-WatcherHealth -Store $script:hstore
+        $h.State | Should -Be 'idle'; $h.Alive | Should -BeTrue
+    }
+    It '閒置超過五分鐘 → stale，不是活的' {
+        SetBeat 'looking' 6
+        $h = Get-WatcherHealth -Store $script:hstore
+        $h.State | Should -Be 'stale'; $h.Alive | Should -BeFalse
+    }
+    It '正在跑二十分鐘 → running，仍然是活的（一輪本來就要十幾分鐘）' {
+        SetBeat 'running abc12345' 20
+        $h = Get-WatcherHealth -Store $script:hstore
+        $h.State | Should -Be 'running'; $h.Alive | Should -BeTrue; $h.RunningSha | Should -Be 'abc12345'
+    }
+    It '同一個 sha 跑超過一小時 → stuck，不是活的' {
+        SetBeat 'running abc12345' 61
+        $h = Get-WatcherHealth -Store $script:hstore
+        $h.State | Should -Be 'stuck'; $h.Alive | Should -BeFalse; $h.RunningSha | Should -Be 'abc12345'
+    }
+}
+
 Describe 'Watcher 設定檔' {
     It '存了再讀回來，預設值補齊' {
         $store = NewStore
