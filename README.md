@@ -63,6 +63,10 @@
 （不是通過）。example-app 就是這樣：PR 的 workflow 是 self-hosted Windows，watcher 要改用
 `workflow_dispatch` 去跑 django-checks。安裝前用視窗的執行分頁「讀取 job 清單」，看每個 job 的事件欄。
 
+**一個事件觸發多個 workflow 時，一定要指定 Job ID。** example-app 的 django-checks 與 monthly-full-suite
+都收 `workflow_dispatch`，不指定的話 act 會兩個都跑，測試數變成兩倍、時間也兩倍。安裝對話框有 Job ID 欄，
+命令列是 `-Job validate`。
+
 分支保護可以要求 `actci` 這個 status。手動執行推的是 `actci/manual`，兩者分開，
 避免工作目錄未提交的狀態被當成正式判定。手動執行的判定不存進 store，否則 watcher 會把那個 commit 當成已判定而跳過。
 

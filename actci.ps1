@@ -600,7 +600,8 @@ function Refresh-WatcherConfig {
         $btnTaskStart.Enabled = $false; $btnTaskStop.Enabled = $false; $btnTaskRemove.Enabled = $false
         return
     }
-    $lblCfg.Text = "$($cfg.Slug)  ←  $($cfg.Repo)`n事件 $($cfg.Event)，每 $($cfg.IntervalSeconds) 秒，發行版 $($cfg.Distro)，安裝於 $($cfg.InstalledAt)"
+    $jobText = if ($cfg.PSObject.Properties['Job'] -and $cfg.Job) { "job $($cfg.Job)" } else { '全部 job' }
+    $lblCfg.Text = "$($cfg.Slug)  ←  $($cfg.Repo)`n事件 $($cfg.Event)，$jobText，每 $($cfg.IntervalSeconds) 秒，發行版 $($cfg.Distro)，安裝於 $($cfg.InstalledAt)"
     $task = Get-ScheduledTask -TaskName $cfg.TaskName -ErrorAction SilentlyContinue
     if (-not $task) {
         $lblTask.Text = "排程工作 $($cfg.TaskName) 不存在（被移除了？）"; $lblTask.ForeColor = $Red
@@ -670,9 +671,16 @@ function Show-InstallWatcherDialog {
     $tInt = New-Object System.Windows.Forms.NumericUpDown; $tInt.Location = New-Object System.Drawing.Point(370, 81); $tInt.Size = New-Object System.Drawing.Size(80, 24)
     $tInt.Minimum = 15; $tInt.Maximum = 3600; $tInt.Value = if ($cfg) { [int]$cfg.IntervalSeconds } else { 60 }
     $dlg.Controls.Add($tInt)
-    $help = New-Block '會開一個主控台視窗執行 install_watcher.ps1，顯示五個步驟。前提：Docker、act、gh 都已就緒。裝完回到這個分頁按「重新整理」。' 12 116 536 60
+    $dlg.Controls.Add((New-Label 'Job ID' 12 118 90))
+    $tJob = New-Object System.Windows.Forms.TextBox; $tJob.Location = New-Object System.Drawing.Point(110, 115); $tJob.Size = New-Object System.Drawing.Size(160, 24)
+    $tJob.Text = if ($cfg -and $cfg.PSObject.Properties['Job']) { [string]$cfg.Job } elseif ($lvJobs.SelectedItems.Count -gt 0) { $lvJobs.SelectedItems[0].Tag.JobId } else { '' }
+    $dlg.Controls.Add($tJob)
+    $jobHint = New-Label '留空 = 該事件下所有 job 都跑。多個 workflow 收同一事件時要填。' 280 118 260; $jobHint.ForeColor = $Gray
+    $dlg.Controls.Add($jobHint)
+    $help = New-Block '會開一個主控台視窗執行 install_watcher.ps1，顯示五個步驟。前提：Docker、act、gh 都已就緒。裝完回到這個分頁按「重新整理」。' 12 148 536 40
     $help.ForeColor = $Gray; $dlg.Controls.Add($help)
-    $bOk = New-Button '安裝' 350 185 95 30; $bCancel = New-Button '取消' 453 185 95 30
+    $dlg.ClientSize = New-Object System.Drawing.Size(560, 236)
+    $bOk = New-Button '安裝' 350 196 95 30; $bCancel = New-Button '取消' 453 196 95 30
     $dlg.Controls.AddRange(@($bOk, $bCancel)); $dlg.AcceptButton = $bOk; $dlg.CancelButton = $bCancel
     $bBrowse.Add_Click({
         $fb = New-Object System.Windows.Forms.FolderBrowserDialog; $fb.ShowNewFolderButton = $false
@@ -682,7 +690,7 @@ function Show-InstallWatcherDialog {
         if (-not $tRepo.Text.Trim() -or $tSlug.Text.Trim() -notmatch '^[^/\s]+/[^/\s]+$') {
             [System.Windows.Forms.MessageBox]::Show('Repo 路徑與 owner/repo 都要填。', 'actci') | Out-Null; return
         }
-        $dlg.Tag = @{ Repo = $tRepo.Text.Trim(); Slug = $tSlug.Text.Trim(); Event = $tEvent.Text.Trim(); Interval = [int]$tInt.Value }
+        $dlg.Tag = @{ Repo = $tRepo.Text.Trim(); Slug = $tSlug.Text.Trim(); Event = $tEvent.Text.Trim(); Interval = [int]$tInt.Value; Job = $tJob.Text.Trim() }
         $dlg.DialogResult = 'OK'; $dlg.Close()
     })
     $bCancel.Add_Click({ $dlg.DialogResult = 'Cancel'; $dlg.Close() })
@@ -690,7 +698,7 @@ function Show-InstallWatcherDialog {
     $a = $dlg.Tag
     $installer = Join-Path $script:Root 'install_watcher.ps1'
     $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-File', "`"$installer`"",
-              '-Repo', "`"$($a.Repo)`"", '-Slug', "`"$($a.Slug)`"", '-Event', "`"$($a.Event)`"",
+              '-Repo', "`"$($a.Repo)`"", '-Slug', "`"$($a.Slug)`"", '-Event', "`"$($a.Event)`"", '-Job', "`"$($a.Job)`"",
               '-IntervalSeconds', $a.Interval, '-Distro', "`"$(Get-WslDistro)`"")
     Start-Process powershell.exe -ArgumentList $args | Out-Null
     Set-Status '安裝器已在另一個視窗執行，完成後按「重新整理」'

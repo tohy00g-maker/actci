@@ -12,6 +12,7 @@ param(
     [Parameter(Mandatory)][string]$Repo,          # Windows 或 Linux 路徑都可以
     [Parameter(Mandatory)][string]$Slug,          # owner/repo
     [string]$Event = 'pull_request',
+    [string]$Job = '',                             # 只跑這個 job id；空字串 = 該事件下的所有 job
     [int]$IntervalSeconds = 60,
     [string]$Distro = '',
     [string]$State = '',                           # 判定與日誌放哪，預設 %LOCALAPPDATA%\actci
@@ -49,9 +50,10 @@ function Write-Line([string]$Message) {
     try { Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8 } catch {}
 }
 
-Write-Line "watcher 啟動：$Slug，repo $repoLinux，事件 $Event，每 $IntervalSeconds 秒一圈，發行版 $(Get-WslDistro)"
+$jobText = if ($Job) { "job $Job" } else { '全部 job' }
+Write-Line "watcher 啟動：$Slug，repo $repoLinux，事件 $Event，$jobText，每 $IntervalSeconds 秒一圈，發行版 $(Get-WslDistro)，store $($store.Root)"
 
-$result = Start-WatcherLoop -Store $store -Slug $Slug -RepoPath $repoLinux -Event $Event `
+$result = Start-WatcherLoop -Store $store -Slug $Slug -RepoPath $repoLinux -Event $Event -Job $Job `
     -TimeoutMs ($TimeoutMinutes * 60000) -IntervalSeconds $IntervalSeconds -Once:$Once `
     -Log { param($m) Write-Line $m }
 

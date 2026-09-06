@@ -20,6 +20,7 @@ param(
     [Parameter(Mandatory)][string]$Repo,
     [Parameter(Mandatory)][string]$Slug,
     [string]$Event = 'pull_request',
+    [string]$Job = '',              # 只跑這個 job id。一個事件觸發多個 workflow 時（例如兩個都收 workflow_dispatch）務必指定，否則全部都跑
     [int]$IntervalSeconds = 60,
     [string]$Distro = '',
     [string]$TaskName = 'actci-watcher',
@@ -69,7 +70,7 @@ if ($repoLinux -like '/mnt/*') { Say '（提醒：repo 在 Windows 磁碟上，D
 Write-Output '== 2/5 先跑一圈'
 # 註冊一個每分鐘失敗一次的排程，比沒有排程更糟：它會安靜地什麼都不做，
 # 而儀表板上看起來就像「還沒有 PR 要跑」。
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $watcher -Repo $Repo -Slug $Slug -Event $Event -IntervalSeconds $IntervalSeconds -Distro $Distro -Once
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $watcher -Repo $Repo -Slug $Slug -Event $Event -Job $Job -IntervalSeconds $IntervalSeconds -Distro $Distro -Once
 $trial = $LASTEXITCODE
 if ($trial -ne 0) { Write-Error "watcher 現在就跑不起來（離開碼 $trial，原因見上方訊息）。先處理它。" }
 Say '跑得起來'
@@ -78,8 +79,8 @@ Write-Output '== 3/5 註冊'
 # conhost --headless：不彈主控台視窗。watcher 是長駐的，它的視窗會一直占著；
 # 不用 -WindowStyle Hidden（起來才藏，會閃）也不用 LogonType S4U（改它要提權，
 # 權限不夠的帳號會變成工作跑不起來）。
-$argument = ('--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}" -Repo "{1}" -Slug "{2}" -Event "{3}" -IntervalSeconds {4} -Distro "{5}"' -f
-    $watcher, $Repo, $Slug, $Event, $IntervalSeconds, $Distro)
+$argument = ('--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}" -Repo "{1}" -Slug "{2}" -Event "{3}" -Job "{6}" -IntervalSeconds {4} -Distro "{5}"' -f
+    $watcher, $Repo, $Slug, $Event, $IntervalSeconds, $Distro, $Job)
 $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $argument -WorkingDirectory $root
 
 # 兩個觸發器，缺一不可：
@@ -149,7 +150,7 @@ Say "下次自動執行 $($info.NextRunTime)"
 Write-Output '== 5/5 記下設定給視窗用'
 $store = New-Store
 Save-WatcherConfig -Store $store -Config @{
-    Repo = $repoLinux; Slug = $Slug; Event = $Event
+    Repo = $repoLinux; Slug = $Slug; Event = $Event; Job = $Job
     IntervalSeconds = $IntervalSeconds; Distro = $Distro; TaskName = $TaskName
 }
 Say (Get-WatcherConfigPath $store)

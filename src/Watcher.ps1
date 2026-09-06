@@ -36,6 +36,7 @@ function Save-WatcherConfig {
         Repo            = [string]$Config.Repo
         Slug            = [string]$Config.Slug
         Event           = $(if ($Config.ContainsKey('Event') -and $Config.Event) { [string]$Config.Event } else { 'pull_request' })
+        Job             = $(if ($Config.ContainsKey('Job')) { [string]$Config.Job } else { '' })
         IntervalSeconds = $(if ($Config.ContainsKey('IntervalSeconds')) { [int]$Config.IntervalSeconds } else { 60 })
         Distro          = $(if ($Config.ContainsKey('Distro')) { [string]$Config.Distro } else { '' })
         TaskName        = $(if ($Config.ContainsKey('TaskName') -and $Config.TaskName) { [string]$Config.TaskName } else { 'actci-watcher' })
@@ -101,6 +102,7 @@ function Invoke-WatcherRun {
         [Parameter(Mandatory)][string]$RepoPath,
         [Parameter(Mandatory)]$Target,
         [string]$Event = 'pull_request',
+        [string]$Job = '',
         [string]$Distro = '',
         [int]$TimeoutMs = 3600000,
         [scriptblock]$Log = { param($m) Write-Host $m }
@@ -116,7 +118,7 @@ function Invoke-WatcherRun {
 
     $fetch = Update-PullRequestRef -RepoPath $RepoPath -Number ([int]$Target.Number) -Distro $Distro
     if ($fetch.Ok) {
-        $verdict = Invoke-ActRun -RepoPath $RepoPath -Sha $sha -Event $Event -LogDir $Store.Logs -TimeoutMs $TimeoutMs -Distro $Distro
+        $verdict = Invoke-ActRun -RepoPath $RepoPath -Sha $sha -Event $Event -Job $Job -LogDir $Store.Logs -TimeoutMs $TimeoutMs -Distro $Distro
     } else {
         $verdict = New-Verdict -Sha $sha -Repo $RepoPath -Event $Event -Outcome 'errored' -Note $fetch.Detail
         $verdict.FinishedAt = Get-IsoNow
@@ -144,6 +146,7 @@ function Invoke-WatcherTick {
         [Parameter(Mandatory)][string]$Slug,
         [Parameter(Mandatory)][string]$RepoPath,
         [string]$Event = 'pull_request',
+        [string]$Job = '',                 # 空字串 = 該事件下的所有 job
         [string]$Distro = '',
         [int]$TimeoutMs = 3600000,
         [scriptblock]$Log = { param($m) Write-Host $m }
@@ -158,6 +161,15 @@ function Invoke-WatcherTick {
 
     $pulls = @($list.Pulls)
     $pending = @($pulls | Where-Object { -not (Test-VerdictStored $Store $_.Sha) })
+    if ($pending.Count -gt 0) {
+        # 講清楚為什麼要跑：是沒有判定檔，還是舊的 errored 要重試。2026-09-06 第一次安裝時
+        # 一個剛存好判定的 PR 被排程啟動的 watcher 又跑了一次，日誌裡看不出原因。
+        foreach ($p in $pending) {
+            $path = Join-Path $Store.Verdicts (([string]$p.Sha).ToLower() + '.json')
+            $why = if (Test-Path -LiteralPath $path) { "判定檔在（$path）但不算已判定，重試" } else { "沒有判定檔 $path" }
+            & $Log "   待跑 #$($p.Number)：$why"
+        }
+    }
     if ($pending.Count -eq 0) {
         # 「沒事做」也要留一行。空日誌有兩種解釋：一切正常，或它根本沒在轉。
         & $Log "沒事做（開著的 PR：$($pulls.Count)）"
@@ -166,7 +178,7 @@ function Invoke-WatcherTick {
 
     # 最舊的 PR 先做。新的一直進來的話，先到的不該永遠排在後面。
     $target = $pending | Sort-Object -Property Number | Select-Object -First 1
-    return Invoke-WatcherRun -Store $Store -Slug $Slug -RepoPath $RepoPath -Target $target -Event $Event -Distro $Distro -TimeoutMs $TimeoutMs -Log $Log
+    return Invoke-WatcherRun -Store $Store -Slug $Slug -RepoPath $RepoPath -Target $target -Event $Event -Job $Job -Distro $Distro -TimeoutMs $TimeoutMs -Log $Log
 }
 
 function Start-WatcherLoop {
@@ -178,6 +190,7 @@ function Start-WatcherLoop {
         [Parameter(Mandatory)][string]$Slug,
         [Parameter(Mandatory)][string]$RepoPath,
         [string]$Event = 'pull_request',
+        [string]$Job = '',
         [string]$Distro = '',
         [int]$TimeoutMs = 3600000,
         [int]$IntervalSeconds = 60,
@@ -190,7 +203,7 @@ function Start-WatcherLoop {
     while ($true) {
         try {
             # 只留 hashtable：呼叫端給的 -Log 若用 Write-Output，字串會混進來，這裡濾掉。
-            $result = @(Invoke-WatcherTick -Store $Store -Slug $Slug -RepoPath $RepoPath -Event $Event -Distro $Distro -TimeoutMs $TimeoutMs -Log $Log) |
+            $result = @(Invoke-WatcherTick -Store $Store -Slug $Slug -RepoPath $RepoPath -Event $Event -Job $Job -Distro $Distro -TimeoutMs $TimeoutMs -Log $Log) |
                 Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
             if ($null -eq $result) { $result = @{ Action = 'crashed'; Error = '這一圈沒有回傳結果' } }
         } catch {

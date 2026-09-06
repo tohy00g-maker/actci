@@ -25,7 +25,7 @@ Describe 'Invoke-WatcherTick' {
         }
         Mock -ModuleName actci Invoke-ActRun {
             param([string]$RepoPath, [string]$Sha, [string]$Event, [string]$Job, [string[]]$ExtraArgs, [string]$RawArgs, [string]$LogDir, [int]$TimeoutMs, [string]$Distro, [switch]$SkipPreflight)
-            $script:actCalls += ,@{ Sha = $Sha; Event = $Event; LogDir = $LogDir; RepoPath = $RepoPath }
+            $script:actCalls += ,@{ Sha = $Sha; Event = $Event; Job = $Job; LogDir = $LogDir; RepoPath = $RepoPath }
             & $script:actScript $Sha
         }
         Mock -ModuleName actci Send-PendingStatus {
@@ -126,11 +126,22 @@ Describe 'Invoke-WatcherTick' {
         $script:statusCalls.Count | Should -Be 1
         $script:statusCalls[0].State | Should -Be 'success'
 
-        $script:log[0] | Should -Match '^#4 cccccccc older PR title'
-        $script:log[1] | Should -Match '通過（12 支'
+        @($script:log | Where-Object { $_ -match '^#4 cccccccc older PR title' }).Count | Should -Be 1
+        @($script:log | Where-Object { $_ -match '通過（12 支' }).Count | Should -Be 1
         (Get-HeartbeatAge $script:store).Note | Should -Match '^running cccccccc'
     }
 
+    It '-Job 會傳給 act，只跑那個 job（兩個 workflow 都收 workflow_dispatch 時不會全跑）' {
+        $script:pullsScript = { [pscustomobject]@{ Pulls = @((Pull 2 ('b' * 40))); Problem = '' } }
+        Invoke-WatcherTick -Store $script:store -Slug 'me/repo' -RepoPath '/r' -Event 'workflow_dispatch' -Job 'validate' -Log $script:logger | Out-Null
+        $script:actCalls.Count | Should -Be 1
+        $script:actCalls[0].Event | Should -Be 'workflow_dispatch'
+    }
+    It '待跑的 PR 會在日誌裡講為什麼要跑' {
+        $script:pullsScript = { [pscustomobject]@{ Pulls = @((Pull 3 ('c' * 40))); Problem = '' } }
+        Invoke-WatcherTick -Store $script:store -Slug 'me/repo' -RepoPath '/r' -Log $script:logger | Out-Null
+        @($script:log | Where-Object { $_ -like '*待跑 #3：沒有判定檔*' }).Count | Should -Be 1
+    }
     It '一圈只跑一個，第二個留到下一圈' {
         $script:pullsScript = { [pscustomobject]@{ Pulls = @((Pull 1 ('d' * 40)), (Pull 2 ('e' * 40))); Problem = '' } }
         Invoke-WatcherTick -Store $script:store -Slug 'me/repo' -RepoPath '/r' -Log $script:logger | Out-Null
@@ -168,7 +179,7 @@ Describe 'Invoke-WatcherTick' {
         $r = Invoke-WatcherTick -Store $script:store -Slug 'me/repo' -RepoPath '/r' -Log $script:logger
         $r.Outcome | Should -Be 'passed'
         $script:statusCalls[0].State | Should -Be 'failure'
-        $script:log[1] | Should -Match '沒有驗證'
+        @($script:log | Where-Object { $_ -match '沒有驗證' }).Count | Should -Be 1
     }
 }
 
