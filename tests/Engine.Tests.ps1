@@ -63,6 +63,14 @@ Describe 'Invoke-ActRun' {
         $script:logDir = Join-Path $TestDrive ('log-' + [guid]::NewGuid().ToString('N'))
     }
 
+    It 'Docker Desktop 的替身 docker 把提示印在 stdout：判成沒開 WSL integration，不是可用' {
+        $script:wslScript = { param($c) if ($c -like '*command -v act*') { Fake 0 "__NODAEMON__`nThe command 'docker' could not be found in this WSL 2 distro.`nWe recommend to activate the WSL integration in Docker Desktop settings." } else { throw "不該跑到 act：$c" } }
+        $pre = Test-ActPreflight
+        $pre.Ok | Should -BeFalse
+        $pre.Code | Should -Be 'nointegration'
+        $pre.Detail | Should -Match 'WSL integration'
+    }
+
     It '前置檢查失敗：errored，act 沒被叫到' {
         $script:wslScript = { param($c) if ($c -like '*command -v act*') { Fake 0 '__NODOCKER__' } else { throw "不該跑到 act：$c" } }
         $v = Invoke-ActRun -RepoPath '/r' -Sha 'abc1234'

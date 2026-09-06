@@ -33,12 +33,15 @@ function Get-RepoHeadSha {
 function Test-ActPreflight {
     # act 與 docker 都要在 WSL 裡叫得動。回傳 @{ Ok; Detail }。
     param([string]$Distro = '')
+    # docker 那一段看**離開碼**，不看有沒有輸出：Docker Desktop 沒開 WSL integration 時，
+    # WSL 裡的 docker 是一支替身腳本，會把「請開啟 WSL integration」印在 stdout 然後失敗。
+    # 只看輸出會把那句提示當成版本號，判成可用。
     $cmd = $script:BashPrefix +
         'if ! command -v act >/dev/null 2>&1; then echo __NOACT__; exit 0; fi; ' +
         'if ! command -v docker >/dev/null 2>&1; then echo __NODOCKER__; exit 0; fi; ' +
-        'v=$(docker info --format {{.ServerVersion}} 2>/dev/null); ' +
-        'if [ -z "$v" ]; then echo __NODAEMON__; exit 0; fi; ' +
-        'echo __OK__ $(act --version 2>&1 | head -1) docker $v'
+        'out=$(docker info --format {{.ServerVersion}} 2>&1); rc=$?; ' +
+        'if [ $rc -ne 0 ]; then echo __NODAEMON__; echo "$out"; exit 0; fi; ' +
+        'echo __OK__ $(act --version 2>&1 | head -1) docker $out'
     $r = Invoke-Wsl -BashCommand $cmd -TimeoutMs 60000 -Distro $Distro
     # Code 給程式分支用（視窗依它點燈），Detail 給人看。別讓呼叫端去比對 Detail 的字。
     if ($r.ExitCode -ne 0 -or -not $r.Output) {
@@ -47,7 +50,12 @@ function Test-ActPreflight {
     switch -Wildcard ($r.Output) {
         '*__NOACT__*'    { return [pscustomobject]@{ Ok = $false; Code = 'noact';    Detail = 'act 未安裝（WSL 內找不到 act）' } }
         '*__NODOCKER__*' { return [pscustomobject]@{ Ok = $false; Code = 'nodocker'; Detail = 'WSL 內找不到 docker，Docker Desktop 沒開或沒啟用 WSL integration' } }
-        '*__NODAEMON__*' { return [pscustomobject]@{ Ok = $false; Code = 'nodaemon'; Detail = 'docker 有指令但 daemon 沒回應，Docker Desktop 還在啟動或已停止' } }
+        '*__NODAEMON__*' {
+            if ($r.Output -match 'WSL integration|could not be found in this WSL') {
+                return [pscustomobject]@{ Ok = $false; Code = 'nointegration'; Detail = 'Docker Desktop 沒有對這個發行版開 WSL integration：Settings > Resources > WSL integration 勾選後 Apply' }
+            }
+            return [pscustomobject]@{ Ok = $false; Code = 'nodaemon'; Detail = 'docker 有指令但 daemon 沒回應，Docker Desktop 還在啟動或已停止' }
+        }
         '*__OK__*'       { return [pscustomobject]@{ Ok = $true;  Code = 'ok';       Detail = ($r.Output -replace '__OK__\s*', '').Trim() } }
     }
     return [pscustomobject]@{ Ok = $false; Code = 'unknown'; Detail = "前置檢查回了看不懂的東西：$($r.Output)" }

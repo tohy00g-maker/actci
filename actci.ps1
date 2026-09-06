@@ -12,6 +12,13 @@
 #>
 param([int]$AutoCloseSeconds = 0)   # 煙霧測試用：開起來幾秒後自己關掉
 
+# DPI：不向 Windows 宣告的話，在 125%/150% 縮放的螢幕上整個視窗會被當點陣圖放大，字就糊。
+# 要在建立任何視窗之前呼叫。
+try {
+    Add-Type -Namespace actci -Name Dpi -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();'
+    [actci.Dpi]::SetProcessDPIAware() | Out-Null
+} catch {}
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
@@ -38,12 +45,13 @@ $script:RunVerdict = $null; $script:RunOutput = $null
 # 設定
 # ---------------------------------------------------------------------------
 function Load-Settings {
-    $d = [pscustomobject]@{ Distro = 'Ubuntu'; RepoPath = ''; Event = 'push'; ExtraArgs = ''; Slug = ''; PushManual = $false }
+    $d = [pscustomobject]@{ Distro = 'Ubuntu'; RepoPath = ''; Event = 'push'; ExtraArgs = ''; Slug = ''; PushManual = $false; FontSize = 11 }
     if (Test-Path $script:SettingsFile) {
         try {
             $s = Get-Content $script:SettingsFile -Raw -Encoding UTF8 | ConvertFrom-Json
             foreach ($p in 'Distro', 'RepoPath', 'Event', 'ExtraArgs', 'Slug') { if ($s.PSObject.Properties[$p]) { $d.$p = [string]$s.$p } }
             if ($s.PSObject.Properties['PushManual']) { $d.PushManual = [bool]$s.PushManual }
+            if ($s.PSObject.Properties['FontSize']) { $fs = [double]$s.FontSize; if ($fs -ge 8 -and $fs -le 20) { $d.FontSize = $fs } }
         } catch {}
     }
     return $d
@@ -63,6 +71,9 @@ $form.StartPosition = 'CenterScreen'
 $form.ClientSize = New-Object System.Drawing.Size(1040, 760)
 $form.MinimumSize = New-Object System.Drawing.Size(920, 640)
 $form.Font = New-Object System.Drawing.Font('Microsoft JhengHei UI', 9)
+# 宣告 DPI 之後，版面座標是以 96 DPI 設計的，讓 WinForms 依實際 DPI 把控制項一起放大。
+$form.AutoScaleDimensions = New-Object System.Drawing.SizeF(96, 96)
+$form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
 
 $AnchorTLR = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 $AnchorTR  = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
@@ -259,7 +270,7 @@ $tabEnv.Controls.Add($lblEnvHelp)
 function Persist-Settings {
     $settings.Distro = Get-WslDistro; $settings.RepoPath = $txtRepo.Text; $settings.Event = $cboEvent.Text
     $settings.ExtraArgs = $txtExtra.Text; $settings.Slug = $txtSlug.Text; $settings.PushManual = $chkPush.Checked
-    Save-Settings $settings
+    Save-Settings $settings   # FontSize 原樣寫回，使用者手動改過的值會保留
 }
 function Get-RepoLinuxPath {
     $p = ConvertTo-WslPath $txtRepo.Text
@@ -610,6 +621,7 @@ function Show-InstallWatcherDialog {
     $dlg = New-Object System.Windows.Forms.Form
     $dlg.Text = '安裝 / 更新 watcher'; $dlg.StartPosition = 'CenterParent'; $dlg.FormBorderStyle = 'FixedDialog'
     $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false; $dlg.ClientSize = New-Object System.Drawing.Size(560, 230); $dlg.Font = $form.Font
+    $dlg.AutoScaleDimensions = New-Object System.Drawing.SizeF(96, 96); $dlg.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
     $cfg = $script:WatchCfg
     $dlg.Controls.Add((New-Label 'Repo 路徑' 12 16 90))
     $tRepo = New-Object System.Windows.Forms.TextBox; $tRepo.Location = New-Object System.Drawing.Point(110, 13); $tRepo.Size = New-Object System.Drawing.Size(340, 24)
@@ -732,12 +744,27 @@ $form.Add_Shown({
     if ($cboDistro.Items.Count -gt 0) { Check-Environment | Out-Null }
     if ($AutoCloseSeconds -gt 0) {
         # 事件處理器裡的輸出不會進管線，先記著，關閉後再印。
-        $script:SmokeInfo = "SMOKE: shown title=[$($form.Text)] tabs=$($tabs.TabPages.Count) wsl=[$($lblWsl.Text)] act=[$($lblAct.Text)] gh=[$($lblGh.Text)] beat=[$($lblBeat.Text)]"
+        $script:SmokeInfo = "SMOKE: shown title=[$($form.Text)] tabs=$($tabs.TabPages.Count) distro=[$($cboDistro.Text)] dpi=$($form.DeviceDpi) client=$($form.ClientSize.Width)x$($form.ClientSize.Height) wsl=[$($lblWsl.Text)] act=[$($lblAct.Text)] gh=[$($lblGh.Text)] beat=[$($lblBeat.Text)]"
         $script:Closer = New-Object System.Windows.Forms.Timer; $script:Closer.Interval = $AutoCloseSeconds * 1000
         $script:Closer.Add_Tick({ $script:Closer.Stop(); $form.Close() })
         $script:Closer.Start()
     }
 })
+
+# 字體大小：版面是以 9pt 設計的，這裡換成使用者要的大小並把整個版面等比放大。
+# 想改就編輯 window.json 的 FontSize（8 到 20）。
+$script:UiScale = [double]$settings.FontSize / 9
+if ([Math]::Abs($script:UiScale - 1) -gt 0.01) {
+    $k = $script:UiScale
+    $form.Font = New-Object System.Drawing.Font('Microsoft JhengHei UI', [single]$settings.FontSize)
+    $form.Scale((New-Object System.Drawing.SizeF($k, $k)))
+    $form.MinimumSize = New-Object System.Drawing.Size([int](920 * $k), [int](640 * $k))
+    # 自己指定過字型的控制項不會跟著 form 的字型走，逐一放大。
+    $btnRun.Font = New-Object System.Drawing.Font($form.Font, [System.Drawing.FontStyle]::Bold)
+    $rtbLog.Font = New-Object System.Drawing.Font('Consolas', [single](9.5 * $k))
+    $lblBeat.Font = New-Object System.Drawing.Font('Microsoft JhengHei UI', [single](16 * $k), [System.Drawing.FontStyle]::Bold)
+    foreach ($lv in @($lvJobs, $lvVerdicts)) { foreach ($col in $lv.Columns) { $col.Width = [int]($col.Width * $k) } }
+}
 
 [void]$form.ShowDialog()
 if ($AutoCloseSeconds -gt 0) { Write-Output $script:SmokeInfo; Write-Output 'SMOKE: closed cleanly' }

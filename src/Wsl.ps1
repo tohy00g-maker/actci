@@ -132,5 +132,7 @@ function Get-WslDistros {
             if ($n -and $n -notlike 'docker-desktop*') { $result += $n }
         }
     } catch {}
-    return ,$result
+    # 不要 `return ,$result`：呼叫端再 @() 一次會變成兩層陣列，下拉選單就顯示 System.Object[]。
+    # 呼叫端一律用 @(Get-WslDistros) 收。
+    return $result
 }
