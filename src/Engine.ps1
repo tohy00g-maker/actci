@@ -66,6 +66,79 @@ function Test-ActPreflight {
     return [pscustomobject]@{ Ok = $false; Code = 'unknown'; Detail = "前置檢查回了看不懂的東西：$($r.Output)" }
 }
 
+
+# Docker 沒開，不是這個 commit 的判定。
+#
+# 2026-09-09：Docker Desktop 自己關了，watcher 拿到 PR #715 時前置檢查回 nointegration，
+# 那個 commit 就被推成 error —— 畫面上跟「CI 自己出問題」長得一模一樣，而它其實只是
+# 「請把 Docker 打開」。使用者的要求很直接：紅了先看 Docker 還活著沒有，關了就再開一次。
+# 與其要求每個人記得，不如讓它自己做。
+#
+# 只在前置檢查抱怨 docker 的那幾種情況下重啟，不是每次紅了都重啟：測試真的失敗時去重啟
+# Docker 只會白等幾分鐘，還會把「到底哪裡壞了」弄糊。
+$script:DockerDownCodes = @('nodocker', 'nodaemon', 'nointegration')
+
+function Start-DockerDesktop {
+    # 只負責叫它起來，不判斷起來了沒有 —— 那是 Test-ActPreflight 的事。回傳 @{ Started; Detail }。
+    param([string[]]$CandidatePaths = @())
+    if (-not $CandidatePaths -or $CandidatePaths.Count -eq 0) {
+        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA) | Where-Object { $_ }
+        $CandidatePaths = @()
+        foreach ($r in $roots) {
+            $CandidatePaths += (Join-Path $r 'Docker\Docker\Docker Desktop.exe')
+            $CandidatePaths += (Join-Path $r 'Docker\Docker Desktop.exe')
+        }
+    }
+    $exe = $CandidatePaths | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+    if (-not $exe) { return @{ Started = $false; Detail = '找不到 Docker Desktop.exe，沒辦法自動啟動' } }
+    try {
+        Start-Process -FilePath $exe -WindowStyle Minimized -ErrorAction Stop | Out-Null
+        return @{ Started = $true; Detail = "已啟動 $exe" }
+    } catch {
+        return @{ Started = $false; Detail = "啟動 Docker Desktop 失敗：$($_.Exception.Message)" }
+    }
+}
+
+function Restore-DockerEngine {
+    # 開起來，然後等到 docker daemon 真的回話為止。回 @{ Recovered; Started; WaitedSeconds; Detail }。
+    #
+    # 等待用輪詢前置檢查，不看「程序在不在」：Docker Desktop 的視窗程序起來之後，daemon 還要
+    # 一段時間才接受連線，WSL integration 又更晚。程序在，不代表 act 跑得動。
+    param(
+        [string]$Distro = '',
+        [int]$WaitSeconds = 180,
+        [int]$PollSeconds = 5,
+        [scriptblock]$Starter = $null,   # 測試注入
+        [scriptblock]$Prober  = $null,   # 測試注入
+        [scriptblock]$Sleeper = $null,   # 測試注入
+        [scriptblock]$Log     = $null
+    )
+    if (-not $Starter) { $Starter = { Start-DockerDesktop } }
+    if (-not $Prober)  { $Prober  = { Test-ActPreflight -Distro $Distro }.GetNewClosure() }
+    if (-not $Sleeper) { $Sleeper = { param($s) Start-Sleep -Seconds $s } }
+    $say = { param($m) if ($Log) { & $Log $m } }
+
+    $start = & $Starter
+    & $say ('   Docker 沒回應，試著重開：' + $start.Detail)
+
+    $waited = 0
+    while ($waited -lt $WaitSeconds) {
+        & $Sleeper $PollSeconds
+        $waited += $PollSeconds
+        if ((& $Prober).Ok) {
+            & $say "   Docker 回來了（等了 $waited 秒）"
+            return @{ Recovered = $true; Started = [bool]$start.Started; WaitedSeconds = $waited; Detail = $start.Detail }
+        }
+    }
+    & $say "   等了 $WaitSeconds 秒，Docker 還是沒回來"
+    return @{
+        Recovered     = $false
+        Started       = [bool]$start.Started
+        WaitedSeconds = $waited
+        Detail        = ($start.Detail + "；等了 $WaitSeconds 秒 daemon 仍未回應")
+    }
+}
+
 # act 的 artifact server 預設綁死 34567。兩個 act 同時起來，後面那個就 fatal：
 #   listen tcp 172.25.86.185:34567: bind: address already in use
 # 而那會被判成「CI 自己出問題」，跟真的壞掉分不出來（2026-09-06 實際發生：有人手動跑量測，
@@ -158,7 +231,10 @@ function Invoke-ActRun {
         [string]$LogDir = '',
         [int]$TimeoutMs = 3600000,
         [string]$Distro = '',
-        [switch]$SkipPreflight
+        [switch]$SkipPreflight,
+        [switch]$NoDockerRestart,
+        [int]$DockerWaitSeconds = 180,
+        [scriptblock]$Log = $null
     )
     $started = [Diagnostics.Stopwatch]::StartNew()
 
@@ -175,6 +251,23 @@ function Invoke-ActRun {
 
     if (-not $SkipPreflight) {
         $pre = Test-ActPreflight -Distro $Distro
+        # Docker 關掉了就自己開回來，開得起來就照常跑，這個 commit 一樣拿得到判定。
+        # 開不起來才認賠，而且註記要說出「試過了」—— 不然下一個人看到 error 又要從頭
+        # 查一次同一件事。
+        if (-not $pre.Ok -and -not $NoDockerRestart -and $script:DockerDownCodes -contains $pre.Code) {
+            $fix = Restore-DockerEngine -Distro $Distro -WaitSeconds $DockerWaitSeconds -Log $Log
+            if ($fix.Recovered) {
+                $pre = Test-ActPreflight -Distro $Distro
+                $back = "Docker 原本沒開，已自動重啟並等了 $($fix.WaitedSeconds) 秒"
+                $verdict.Note = if ($verdict.Note) { $verdict.Note + '；' + $back } else { $back }
+            } else {
+                $pre = [pscustomobject]@{
+                    Ok     = $false
+                    Code   = $pre.Code
+                    Detail = $pre.Detail + '。已試著自動重啟 Docker：' + $fix.Detail
+                }
+            }
+        }
         if (-not $pre.Ok) {
             $verdict.Outcome = 'errored'
             $verdict.Note = $pre.Detail

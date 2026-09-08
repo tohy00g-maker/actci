@@ -24,7 +24,7 @@ Describe 'Invoke-WatcherTick' {
             & $script:wslScript $BashCommand
         }
         Mock -ModuleName actci Invoke-ActRun {
-            param([string]$RepoPath, [string]$Sha, [string]$Event, [string]$Job, [string[]]$ExtraArgs, [string]$RawArgs, [string]$LogDir, [int]$TimeoutMs, [string]$Distro, [switch]$SkipPreflight)
+            param([string]$RepoPath, [string]$Sha, [string]$Event, [string]$Job, [string[]]$ExtraArgs, [string]$RawArgs, [string]$LogDir, [int]$TimeoutMs, [string]$Distro, [switch]$SkipPreflight, [switch]$NoDockerRestart, [int]$DockerWaitSeconds, [scriptblock]$Log)
             $script:actCalls += ,@{ Sha = $Sha; Event = $Event; Job = $Job; LogDir = $LogDir; RepoPath = $RepoPath }
             & $script:actScript $Sha
         }
@@ -265,7 +265,7 @@ Describe '跑測試那十幾分鐘裡心跳要繼續跳' {
         Mock -ModuleName actci Send-PendingStatus { [pscustomobject]@{ Posted = $true; State = 'pending'; Detail = '' } }
         Mock -ModuleName actci Send-CommitStatus { [pscustomobject]@{ Posted = $true; State = 'success'; Detail = '' } }
         Mock -ModuleName actci Invoke-ActRun {
-            param([string]$RepoPath, [string]$Sha)
+            param([string]$RepoPath, [string]$Sha, [scriptblock]$Log)
             $h = Get-WatcherHealth -Store $store
             $h.State | Should -Be 'running'
             $h.RunningSha | Should -Be 'abcdef12'

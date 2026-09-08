@@ -99,10 +99,47 @@ Describe 'Invoke-ActRun' {
 
     It '前置檢查失敗：errored，act 沒被叫到' {
         $script:wslScript = { param($c) if ($c -like '*command -v act*') { Fake 0 '__NODOCKER__' } else { throw "不該跑到 act：$c" } }
-        $v = Invoke-ActRun -RepoPath '/r' -Sha 'abc1234'
+        $v = Invoke-ActRun -RepoPath '/r' -Sha 'abc1234' -NoDockerRestart
         $v.Outcome | Should -Be 'errored'
         $v.Note | Should -Match 'docker'
         @($script:calls | Where-Object { $_ -like '*archive*' }).Count | Should -Be 0
+    }
+
+    It 'Docker 沒開：自己重啟，起來了就照常跑，判定不是 errored' {
+        # 這是 2026-09-09 那一次：Docker Desktop 自己關了，PR #715 被推成 error。
+        # 「Docker 沒開」不是那個 commit 的判定，開回來就該有真正的判定。
+        $script:preCalls = 0
+        $script:wslScript = {
+            param($c)
+            if ($c -like '*command -v act*') {
+                $script:preCalls++
+                if ($script:preCalls -eq 1) { return Fake 0 '__NODOCKER__' }
+                return Fake 0 '__OK__ act version 0.2.80 docker 27.0'
+            }
+            Fake 0 $script:PytestOk
+        }
+        Mock -ModuleName actci Restore-DockerEngine { @{ Recovered = $true; Started = $true; WaitedSeconds = 25; Detail = '已啟動' } }
+        $v = Invoke-ActRun -RepoPath '/r' -Sha 'abc1234'
+        $v.Outcome | Should -Be 'passed'
+        $v.TestsRun | Should -Be 12
+        Should -Invoke -ModuleName actci Restore-DockerEngine -Times 1 -Exactly
+    }
+
+    It 'Docker 沒開而且開不起來：errored，註記要說出已經試過重啟' {
+        $script:wslScript = { param($c) if ($c -like '*command -v act*') { Fake 0 '__NODOCKER__' } else { throw "不該跑到 act：$c" } }
+        Mock -ModuleName actci Restore-DockerEngine { @{ Recovered = $false; Started = $false; WaitedSeconds = 180; Detail = '找不到 Docker Desktop.exe' } }
+        $v = Invoke-ActRun -RepoPath '/r' -Sha 'abc1234'
+        $v.Outcome | Should -Be 'errored'
+        $v.Note | Should -Match '已試著自動重啟 Docker'
+        $v.Note | Should -Match '找不到 Docker Desktop.exe'
+    }
+
+    It '測試真的失敗：不去重啟 Docker' {
+        # 紅了就重啟 Docker 會白等幾分鐘，還會讓人以為問題出在環境。
+        $script:wslScript = { param($c) if ($c -like '*command -v act*') { Fake 0 '__OK__' } else { Fake 1 $script:PytestFail } }
+        Mock -ModuleName actci Restore-DockerEngine { throw '測試失敗不該去動 Docker' }
+        (Invoke-ActRun -RepoPath '/r' -Sha 'abc1234').Outcome | Should -Be 'failed'
+        Should -Invoke -ModuleName actci Restore-DockerEngine -Times 0 -Exactly
     }
 
     It '通過：passed，測試數與來源填好，日誌寫到 LogDir' {
@@ -253,5 +290,56 @@ Error: Job 'validate' failed
         $v = Invoke-ActRun -RepoPath '/r' -Sha 'abc1234'
         $v.Outcome | Should -Be 'errored'
         $v.Note | Should -Match 'WSL 叫不動'
+    }
+}
+
+Describe 'Restore-DockerEngine' {
+    # 開起來、等到 daemon 真的回話為止。Starter/Prober/Sleeper 都注入，測試不碰真的 Docker、也不真的睡。
+    It '等到前置檢查通過就回來，並回報等了幾秒' {
+        $script:probes = 0
+        $r = Restore-DockerEngine -WaitSeconds 60 -PollSeconds 5 `
+            -Starter { @{ Started = $true; Detail = '已啟動' } } `
+            -Prober  { $script:probes++; @{ Ok = ($script:probes -ge 3) } } `
+            -Sleeper { param($s) }
+        $r.Recovered | Should -BeTrue
+        $r.WaitedSeconds | Should -Be 15
+    }
+
+    It '等到逾時仍然沒回應：Recovered 是 false，說明裡有等了多久' {
+        $r = Restore-DockerEngine -WaitSeconds 20 -PollSeconds 5 `
+            -Starter { @{ Started = $true; Detail = '已啟動' } } `
+            -Prober  { @{ Ok = $false } } `
+            -Sleeper { param($s) }
+        $r.Recovered | Should -BeFalse
+        $r.WaitedSeconds | Should -Be 20
+        $r.Detail | Should -Match '20 秒'
+    }
+
+    It '連 Docker Desktop 都找不到：不丟例外，照樣回一個結果' {
+        $r = Restore-DockerEngine -WaitSeconds 10 -PollSeconds 5 `
+            -Starter { @{ Started = $false; Detail = '找不到 Docker Desktop.exe，沒辦法自動啟動' } } `
+            -Prober  { @{ Ok = $false } } `
+            -Sleeper { param($s) }
+        $r.Recovered | Should -BeFalse
+        $r.Started | Should -BeFalse
+        $r.Detail | Should -Match '找不到 Docker Desktop.exe'
+    }
+
+    It '啟動之前不先探一次：daemon 剛剛才被判定沒回應' {
+        # 呼叫端是在前置檢查失敗之後才叫這一支的，開頭再探一次只是白白多等一輪。
+        $script:firstProbe = $null
+        Restore-DockerEngine -WaitSeconds 5 -PollSeconds 5 `
+            -Starter { $script:firstProbe = 'started'; @{ Started = $true; Detail = 'x' } } `
+            -Prober  { if (-not $script:firstProbe) { throw '啟動前不該探' }; @{ Ok = $true } } `
+            -Sleeper { param($s) } | Out-Null
+        $script:firstProbe | Should -Be 'started'
+    }
+}
+
+Describe 'Start-DockerDesktop' {
+    It '候選路徑都不存在：回 Started=false 與看得懂的說明，不丟例外' {
+        $r = Start-DockerDesktop -CandidatePaths @((Join-Path $TestDrive 'nope\Docker Desktop.exe'))
+        $r.Started | Should -BeFalse
+        $r.Detail | Should -Match '找不到'
     }
 }

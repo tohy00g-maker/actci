@@ -146,3 +146,19 @@ Describe 'status / verdict / help' {
         (Invoke-Cli @('nonsense')).ExitCode | Should -Be 1
     }
 }
+
+Describe 'run <repo> 的路徑檢查' {
+    # 2026-09-09：有人把 GitHub slug 當成 repo 路徑打進去，git archive 在 WSL 裡失敗，
+    # 那條路徑會產出一份 outcome=errored 的判定 —— 存下去就蓋掉同一個 sha 上真正的判定。
+    # 打錯字不該變成一個 commit 的判決，所以在叫 act 之前就擋下來。
+    It 'GitHub slug 當路徑：離開碼 1，而且明講這裡要的是本地路徑' {
+        $r = Invoke-Cli @('run', 'example-org/example-app', '--json')
+        $r.ExitCode | Should -Be 1
+        $o = $r.Output | ConvertFrom-Json
+        $o.error | Should -Be 'bad-repo'
+        $o.detail | Should -Match 'GitHub slug'
+    }
+    It '不存在的相對路徑：離開碼 1' {
+        (Invoke-Cli @('run', 'no-such-directory-here')).ExitCode | Should -Be 1
+    }
+}

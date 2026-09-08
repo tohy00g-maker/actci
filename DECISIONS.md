@@ -134,6 +134,39 @@ AppData 會被重導到套件快取，排程 watcher 看不到 AI 存的判定�
 
 ---
 
+## 15. Docker 沒開就自己開回來，不要把它寫成 commit 的判定（2026-09-09 補）
+
+2026-09-09 凌晨 Docker Desktop 自己關了。watcher 06:46 拿到 PR #715，前置檢查回 `nointegration`，
+那個 commit 就被推成 `error`。畫面上它跟「CI 自己出問題」一模一樣，但它其實只是「請把 Docker 打開」——
+而且它會佔住那個 sha 的判定檔，接下來 30 分鐘 watcher 都不會再看它一眼。
+
+「Docker 沒開」不是那個 commit 的判定。跟第 12 條「有人在跑不是判定」是同一個道理。
+
+所以 `Invoke-ActRun` 在前置檢查回 `nodocker` / `nodaemon` / `nointegration` 時，先 `Restore-DockerEngine`：
+啟動 Docker Desktop，然後每 5 秒重跑一次前置檢查，最多等 180 秒。等到了就照常跑，那個 commit 一樣拿得到
+真正的判定，只在註記裡留一句「Docker 原本沒開，已自動重啟」。等不到才認賠成 errored，而且註記要說出
+已經試過重啟 —— 不然下一個人看到 error 又得從頭查一次同一件事。
+
+三個界線：
+
+- **只在 docker 那三種前置檢查碼下重啟。** 測試真的失敗時去重啟 Docker 只會白等三分鐘，還會讓人以為
+  問題出在環境。有一支測試就是盯著這件事。
+- **等待用輪詢前置檢查，不看「程序在不在」。** Docker Desktop 的視窗程序起來之後，daemon 還要一段時間
+  才接受連線，WSL integration 又更晚。程序在，不代表 act 跑得動。
+- **啟動之前不先探一次。** 呼叫端是在前置檢查剛失敗之後才叫它的，開頭再探一次只是白白多等一輪。
+
+`Start-DockerDesktop` / `Restore-DockerEngine` 的 Starter / Prober / Sleeper 都可注入，測試不碰真的 Docker、
+也不真的睡。`-NoDockerRestart` 關掉整段。
+
+同一天的另一半：`run <repo>` 收到不存在的相對路徑會直接擋掉。當天有人把 GitHub slug 打成 repo 路徑，
+`git archive` 在 WSL 裡失敗，而那條路徑會產出一份 `outcome=errored` 的判定 —— 存下去就蓋掉同一個 sha 上
+真正的判定。打錯字不該變成一個 commit 的判決。
+
+（附帶一提：Pester 6 拿掉了 `Assert-MockCalled`。寫成那樣時 PowerShell 會為了找它自動載入系統內建的
+Pester 3.4.0，然後 3.4.0 的 `BeforeAll` 會蓋掉之後每一個測試檔的探索。一律用 `Should -Invoke`。）
+
+---
+
 ## 實作順序
 
 1. **判定與儲存**：Verdict 型別、Store（JSON 一 commit 一檔、心跳、recent）、tests_run 解析器，附 Pester。

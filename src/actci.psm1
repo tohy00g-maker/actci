@@ -24,7 +24,7 @@ Export-ModuleMember -Function @(
     'ConvertFrom-WslBytes', 'New-WslStartInfo', 'Invoke-Wsl', 'Get-WslDistros',
     # Engine
     'Get-RepoHeadSha', 'Test-ActPreflight', 'New-ActCommand', 'Invoke-ActRun', 'Complete-ActVerdict',
-    'Enter-ActLock', 'Exit-ActLock',
+    'Enter-ActLock', 'Exit-ActLock', 'Start-DockerDesktop', 'Restore-DockerEngine',
     # GitHub
     'Invoke-Gh', 'Test-GhAuth', 'Send-CommitStatus', 'Send-PendingStatus', 'Get-OpenPullRequests',
     # Watcher

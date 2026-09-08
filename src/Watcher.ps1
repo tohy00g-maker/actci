@@ -236,7 +236,7 @@ function Invoke-WatcherRun {
     if ($fetch.Ok) {
         $pulse = Start-HeartbeatPulse -Store $Store -Note $runNote
         try {
-            $verdict = Invoke-ActRun -RepoPath $RepoPath -Sha $sha -Event $Event -Job $Job -LogDir $Store.Logs -TimeoutMs $TimeoutMs -Distro $Distro
+            $verdict = Invoke-ActRun -RepoPath $RepoPath -Sha $sha -Event $Event -Job $Job -LogDir $Store.Logs -TimeoutMs $TimeoutMs -Distro $Distro -Log $Log
         } finally {
             Stop-HeartbeatPulse $pulse
         }
