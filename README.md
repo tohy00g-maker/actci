@@ -100,6 +100,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File actci-cli.ps1 <command> [arg
 watcher 是排程工作 `actci-watcher`，以 conhost --headless 啟動所以沒有視窗，每 10 分鐘的重複觸發是重啟保險。
 安裝器最後會驗 NextRunTime 不為空，因為「它跑得動」跟「它會自己跑」是兩件事。
 
+**改了 `src\` 底下的東西之後要重啟 watcher。** 它是一個長命的行程，模組在它啟動那一刻就載進記憶體了，
+之後不管檔案怎麼改都不會重讀。2026-09-09 那次 Docker 自動重啟改完、測試全綠、也推上去了，watcher 卻還在
+跑三天前載進去的舊程式。重啟法：
+
+```powershell
+Stop-ScheduledTask  -TaskName actci-watcher    # 這一步只是叫它停，重複觸發還是會把它叫回來
+Start-ScheduledTask -TaskName actci-watcher
+```
+
+要真的暫停（例如手動量測期間）得用 `Disable-ScheduledTask`；只 `Stop-` 的話 10 分鐘後它又自己起來了。
+重啟會放棄當下那一輪 act，被放棄的 commit 沒有判定檔，下一圈自然會重跑，不會漏判。
+
 ## 檔案
 
 | 路徑 | 用途 |
