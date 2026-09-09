@@ -134,3 +134,47 @@ Describe 'Test-GhAuth' {
         (Test-GhAuth).Ok | Should -BeFalse
     }
 }
+
+Describe 'body 怎麼送到 gh 手上' {
+    # 2026-09-09：判定都算對了、也存進 store 了，PR 上的檢查卻一直停在舊的那一份
+    # —— `gh: Problems parsing JSON (HTTP 400)`。JSON 本身沒問題，同一份內容改用
+    # `--input <檔案>` GitHub 就收下。
+    #
+    # 差別在 stdin 的第一個位元組：只要 .NET 碰過 Process.StandardInput，它就會用
+    # Console.InputEncoding 建一個 AutoFlush 的 StreamWriter，而設 AutoFlush 會立刻
+    # flush 一次 —— 那一下把 UTF-8 的 BOM 寫在我們的 JSON 前面。
+    #
+    # 這件事最貴的不是少一個綠勾：`gh pr checks` 會回「no checks reported」而且
+    # 離開碼 0，看起來跟「等過了、沒問題」一模一樣。
+
+    It '暫存檔沒有 BOM，內容一個位元組都不差' {
+        $path = New-GhInputFile -Text '{"state":"success"}'
+        try {
+            $bytes = [System.IO.File]::ReadAllBytes($path)
+            $bytes[0] | Should -Be 0x7b
+            [System.Text.Encoding]::UTF8.GetString($bytes) | Should -Be '{"state":"success"}'
+        } finally {
+            Remove-Item $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It '中文的 description 也是 UTF-8，而且還是沒有 BOM' {
+        $text = '{"description":"' + ([char]0x901A + [char]0x904E) + '"}'
+        $path = New-GhInputFile -Text $text
+        try {
+            $bytes = [System.IO.File]::ReadAllBytes($path)
+            $bytes[0] | Should -Be 0x7b
+            [System.Text.Encoding]::UTF8.GetString($bytes) | Should -Be $text
+        } finally {
+            Remove-Item $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It '只換緊接在 --input 後面的那一格' {
+        $out = Resolve-GhInputArgument -Arguments @('api', '--method', 'POST', 'repos/x/y/statuses/z', '--input', '-') -Path 'C:\tmp\b.json'
+        $out | Should -Be @('api', '--method', 'POST', 'repos/x/y/statuses/z', '--input', 'C:\tmp\b.json')
+    }
+    It '別的地方的 - 不要動它' {
+        # 譬如將來有人送 `--jq -`，或某個 flag 的值剛好是一個減號。
+        $out = Resolve-GhInputArgument -Arguments @('api', '--jq', '-', '--input', '-') -Path 'C:\tmp\b.json'
+        $out | Should -Be @('api', '--jq', '-', '--input', 'C:\tmp\b.json')
+    }
+}

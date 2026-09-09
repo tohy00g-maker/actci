@@ -15,6 +15,51 @@
 # 呼叫端是 watcher 迴圈；在那裡丟例外會讓整圈停掉，而「沒能回報」不該讓
 # 「已經跑完的測試」跟著消失。
 
+function New-GhInputFile {
+    # 把 body 落成一個暫存檔，回傳路徑。**不可以有 BOM。**
+    #
+    # ## 為什麼不從 stdin 餵
+    #
+    # 2026-09-09：每一份判定都算對了、也存進 store 了，但 PR 上的檢查一直停在
+    # 舊的那一份 —— `gh: Problems parsing JSON (HTTP 400)`。JSON 本身是好的，
+    # 同一份內容用 `--input <檔案>` 送，GitHub 就收下。
+    #
+    # 差別在 stdin 的**第一個位元組**。只要 .NET 碰過 `Process.StandardInput`，
+    # 它就會用 `Console.InputEncoding` 建一個 AutoFlush 的 StreamWriter，而設
+    # AutoFlush 會立刻 flush 一次 —— 那一下把 UTF-8 的 BOM（EF BB BF）寫進了
+    # 子行程的 stdin，寫在我們自己的 JSON 前面。GitHub 的解析器看到那三個位元組
+    # 就回 400。（同一條指令在 bash 裡管用，因為那條路上沒有 .NET。）
+    #
+    # 這件事最貴的地方不是漏一個綠勾：`gh pr checks` 會回「no checks reported」
+    # 而且離開碼 0 —— 看起來跟「等過了、沒問題」一模一樣。
+    param([Parameter(Mandatory)][string]$Text)
+    $path = [System.IO.Path]::Combine(
+        [System.IO.Path]::GetTempPath(),
+        "actci-gh-$([guid]::NewGuid().ToString('n')).json")
+    [System.IO.File]::WriteAllBytes(
+        $path,
+        (New-Object System.Text.UTF8Encoding $false).GetBytes($Text))
+    return $path
+}
+
+function Resolve-GhInputArgument {
+    # 把 `--input -` 換成 `--input <暫存檔>`。只換緊接在 --input 後面的那一格，
+    # 不是每一個長得像 `-` 的參數。
+    param(
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [Parameter(Mandatory)][string]$Path
+    )
+    $out = @()
+    for ($i = 0; $i -lt $Arguments.Count; $i++) {
+        if ($i -gt 0 -and $Arguments[$i] -eq '-' -and $Arguments[$i - 1] -eq '--input') {
+            $out += $Path
+        } else {
+            $out += $Arguments[$i]
+        }
+    }
+    return , $out
+}
+
 function Invoke-Gh {
     # 同步呼叫 gh.exe。回傳 @{ ExitCode; Output; Error }。測試會把這支 Mock 掉。
     param(
@@ -22,7 +67,12 @@ function Invoke-Gh {
         [string]$InputText = '',
         [int]$TimeoutMs = 60000
     )
+    $inputFile = ''
     try {
+        if ($InputText) {
+            $inputFile = New-GhInputFile -Text $InputText
+            $Arguments = Resolve-GhInputArgument -Arguments $Arguments -Path $inputFile
+        }
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = 'gh.exe'
         $psi.Arguments = (($Arguments | ForEach-Object { ConvertTo-WinArg $_ }) -join ' ')
@@ -34,14 +84,9 @@ function Invoke-Gh {
         $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
         $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8
         $p = [System.Diagnostics.Process]::Start($psi)
-        if ($InputText) {
-            $writer = New-Object System.IO.StreamWriter($p.StandardInput.BaseStream, (New-Object System.Text.UTF8Encoding $false))
-            $writer.Write($InputText)
-            $writer.Flush()
-            $writer.Close()
-        } else {
-            $p.StandardInput.Close()
-        }
+        # body 走檔案，所以這裡永遠只是把 stdin 關掉。不要再往裡面寫東西 ——
+        # 那條路上 .NET 會先塞一個 BOM 進去，見 New-GhInputFile。
+        $p.StandardInput.Close()
         $so = $p.StandardOutput.ReadToEndAsync()
         $se = $p.StandardError.ReadToEndAsync()
         if (-not $p.WaitForExit($TimeoutMs)) {
@@ -51,6 +96,10 @@ function Invoke-Gh {
         return [pscustomobject]@{ ExitCode = $p.ExitCode; Output = $so.Result.TrimEnd(); Error = $se.Result.TrimEnd() }
     } catch {
         return [pscustomobject]@{ ExitCode = -1; Output = ''; Error = "叫不動 gh：$($_.Exception.Message)" }
+    } finally {
+        if ($inputFile -and (Test-Path $inputFile)) {
+            Remove-Item $inputFile -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
