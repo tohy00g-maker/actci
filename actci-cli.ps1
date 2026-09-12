@@ -154,14 +154,14 @@ switch ($Command.ToLower()) {
 
     'run' {
         if ($positional.Count -lt 1) { Write-Usage 'run 需要 <repo>'; exit 1 }
-        # <repo> 是本地路徑，不是 GitHub slug。2026-09-09 有人打了 example-org/example-app，
+        # <repo> 是本地路徑，不是 GitHub slug。2026-09-09 有人把 owner/repo 這種寫法打進去了，
         # git archive 在 WSL 裡失敗，而那條路徑會產出一份 outcome=errored 的判定 —— 存下去就
         # 蓋掉同一個 sha 上真正的判定。打錯字不該變成一個 commit 的判決。
         $given = $positional[0]
         $looksAbsolute = $given -match '^(/|\\\\|[A-Za-z]:)'
         if (-not $looksAbsolute -and -not (Test-Path -LiteralPath $given -PathType Container)) {
             $hint = "找不到 repo 路徑：$given"
-            if ($given -match '^[^/\\]+/[^/\\]+$') { $hint += "。這看起來是 GitHub slug；run 要的是本地 repo 路徑（例如 C:\Users\你\example-app 或 /home/你/src/example-app）" }
+            if ($given -match '^[^/\\]+/[^/\\]+$') { $hint += "。這看起來是 GitHub slug；run 要的是本地 repo 路徑（例如 C:\Users\你\my-repo 或 /home/你/src/my-repo）" }
             Out-Result ([ordered]@{ error = 'bad-repo'; detail = $hint }) $hint
             exit 1
         }

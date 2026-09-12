@@ -1,11 +1,11 @@
 ﻿# CI runner 的排程工作共用的一點東西。
 #
-# 2026-09-02 這幾支從 example-app 搬過來時，它們 dot-source 的是那邊的
+# 2026-09-02 這幾支從原本那個專案搬過來時，它們 dot-source 的是那邊的
 # `scripts/_deployment_common.ps1` —— 而那份沒有一起搬。**我搬了腳本卻沒搬
 # 它依賴的東西**，而那件事是真的跑一次才抓到的（語法檢查過得了）。
 #
 # 只拄需要的那一個函式，不把整份包抬過來 —— 那份裡其餘的都是
-# example-app 的部署邏輯，跟 runner 無關。
+# 那個專案的部署邏輯，跟 runner 無關。
 
 
 function New-QuietScheduledTaskAction([string]$Execute, [string]$Argument,

@@ -86,10 +86,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File actci-cli.ps1 <command> [arg
 
 **watcher 的事件要選 act 跑得動的那個 workflow 所接受的事件。** act 只跑 `runs-on: ubuntu-*` 的 job；
 一個 repo 若 `pull_request` 只觸發 self-hosted 或 windows 的 workflow，act 會全部跳過，判定會是 CI 錯誤
-（不是通過）。example-app 就是這樣：PR 的 workflow 是 self-hosted Windows，watcher 要改用
-`workflow_dispatch` 去跑 django-checks。安裝前用視窗的執行分頁「讀取 job 清單」，看每個 job 的事件欄。
+（不是通過）。我自己用它守的那個 repo 就是這樣：PR 的 workflow 是 self-hosted Windows，watcher 得改用
+`workflow_dispatch` 去跑那個 Ubuntu 上的檢查 workflow。安裝前用視窗的執行分頁「讀取 job 清單」，看每個 job 的事件欄。
 
-**一個事件觸發多個 workflow 時，一定要指定 Job ID。** example-app 的 django-checks 與 monthly-full-suite
+**一個事件觸發多個 workflow 時，一定要指定 Job ID。** 例如同一個 repo 裡「每次檢查」與「每月全套」兩個 workflow
 都收 `workflow_dispatch`，不指定的話 act 會兩個都跑，測試數變成兩倍、時間也兩倍。安裝對話框有 Job ID 欄，
 命令列是 `-Job validate`。
 
@@ -131,7 +131,7 @@ Start-ScheduledTask -TaskName actci-watcher
 | `src/Engine.ps1` | act 執行核心，含前置檢查與 git archive |
 | `src/GitHub.ps1` | 透過 gh 推 status、列 PR |
 | `src/Watcher.ps1` | 一圈的決策與迴圈 |
-| `runner/` | GitHub self-hosted runner 的重啟與看門狗（從 localci 搬來，參數預設值仍是 example-app 的） |
+| `runner/` | GitHub self-hosted runner 的重啟與看門狗（從 localci 搬來，參數預設值仍是我原本那台機器的） |
 | `tests/` | Pester 測試，不需要 Docker 與網路 |
 
 判定與日誌：`~\.actci\verdicts\<sha>.json`、`logs\<sha>.log`、`heartbeat.txt`、`watcher.log`、`watcher.json`。

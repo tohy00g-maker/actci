@@ -161,7 +161,7 @@ Describe 'Invoke-ActRun' {
         $script:calls[1] | Should -Match "archive --format=tar 'abcdef1234567890'"
     }
 
-    It 'act 離開碼 0 但所有 job 因平台不支援被跳過：errored，不是通過（2026-09-06 example-app 實測）' {
+    It 'act 離開碼 0 但所有 job 因平台不支援被跳過：errored，不是通過（2026-09-06 實測）' {
         $skipped = "[Self-hosted checks/validate] 🚧  Skipping unsupported platform -- Try running with ``-P self-hosted=...```n[Self-hosted checks/validate] 🚧  Skipping unsupported platform -- Try running with ``-P windows=...``"
         $script:wslScript = { param($c) if ($c -like '*command -v act*') { Fake 0 '__OK__' } else { Fake 0 $skipped } }
         $v = Invoke-ActRun -RepoPath '/r' -Sha 'abc1234' -Event 'pull_request'

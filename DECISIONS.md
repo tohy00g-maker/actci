@@ -14,7 +14,7 @@
 
 ## 2. 執行引擎：只用 act，不保留寫死的 Django 腳本
 
-所有專案一律跑自己的 `.github/workflows`，example-app 也是。
+所有專案一律跑自己的 `.github/workflows`，沒有例外。
 
 **為什麼：** 與 GitHub 上的行為一致，換專案不必改程式碼。
 **代價：** 失去 localci 依 requirements 雜湊自建映像的快取，首次執行較慢。act 的
@@ -64,7 +64,7 @@ tests_run 從 act 的輸出解析，支援的結尾統計行：
 localci 的 scope.py 不搬。專案想省時間就在 workflow 用 `paths:`、`paths-ignore:` 與 job 層的 `if:`。
 
 **為什麼：** 那是在重做 GitHub Actions 已有的功能，而且 localci 自己已經實測發現
-「只改文件就不跑」這條規則在 example-app 上是錯的。
+「只改文件就不跑」這條規則在我實際用它守的那個 repo 上是錯的。
 
 ## 7. 圖形介面：同一個 WinForms 視窗，三個分頁
 
